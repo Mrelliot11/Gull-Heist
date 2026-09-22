@@ -1,0 +1,5 @@
+# For a VPS: Caddy gets the HTTPS certificate automatically and
+# forwards everything (including the /ws WebSocket) to the game.
+yourgame.gg {
+	reverse_proxy localhost:8080
+}
