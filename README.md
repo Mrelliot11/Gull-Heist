@@ -2,11 +2,12 @@
 
 A top-down seagull food-heist game for phones and computers, with online multiplayer.
 
-This folder is the whole website. `server.js` serves the game and relays multiplayer data between players over WebSocket. Players don't need accounts.
+This folder is the whole website. `server.js` serves the game and runs every multiplayer match over WebSocket. Players don't need accounts.
 
 ```
-server.js          web server + multiplayer relay (Node 18+, one dependency: ws)
-public/index.html  the game (a single self-contained page)
+server.js          web server + multiplayer rooms (Node 18+, one dependency: ws)
+public/index.html  the game page
+public/shared.js   city, people and steal rules, used by both the page and the server
 public/og.png      link-preview image (Discord, iMessage, etc.)
 Dockerfile         container build, if your host uses one
 Caddyfile.example  HTTPS reverse proxy config for a VPS
@@ -22,12 +23,24 @@ npm start
 
 ## How rooms work
 
-- `https://yourgame.gg/` puts everyone in the room called `public`.
-- `https://yourgame.gg/?room=friday` is a private room called `friday`. Only people with that link (or who type that code in the lobby) see each other.
-- Room codes can use lowercase letters, numbers and dashes, up to 24 characters.
-- Each room holds up to 12 players.
+- `https://yourgame.gg/` puts everyone in the room called `public`. Anyone there can start a match.
+- In the lobby, **New private room** makes a room with a random code such as `k7f-q2m`. The page's address changes to `?room=k7f-q2m`; **Copy link** copies it for friends.
+- Type a code and press **Join** to switch rooms, or **Public room** to go back. Switching doesn't reload the page.
+- Each room has its own lobby and matches. In a private room, the first player in (marked ★) is the leader and starts matches. If they leave, the next player takes over.
+- Players who arrive mid-match press **Join match** to jump in.
+- If your connection drops, reconnecting within 30 seconds puts you back in the match with your score.
+- Room codes can use lowercase letters, numbers and dashes, up to 24 characters. Each room holds up to 12 players.
 
-The lobby has a **Copy link** button that copies the current room's link.
+## Rules
+
+- Every person watches a cone in front of them. Swoop from behind to steal their food.
+- Swooping into a regular person's (white) cone gets you shooed: no food, no harm done.
+- Grumps (red cone, double value) and cart vendors (yellow cone, 50 points) swat you. Three swats and you're grounded for 6 seconds (the match ends in solo).
+- Someone who was just robbed stays alert for a few seconds: their cone widens and they turn to face the nearest gull.
+- Steals within 3.5 seconds of each other chain a combo, up to x5.
+- A dashed ring marks the food a swoop from where you are would grab.
+
+On a computer, choose **Controls: Mouse** (point to fly, click to swoop) or **Controls: Keyboard** (WASD or arrow keys to fly, Space/J/K to swoop) on the title screen or in the pause menu. Phones use drag to fly and tap to swoop.
 
 ## Settings (environment variables)
 
@@ -37,6 +50,9 @@ The lobby has a **Copy link** button that copies the current room's link.
 | `PUBLIC_URL` | *(unset)* | Your site's address, e.g. `https://yourgame.gg`. Turns on the link-preview image in Discord and similar apps. |
 | `MAX_PEERS_PER_ROOM` | `12` | Players allowed in one room. |
 | `MAX_ROOMS` | `200` | Rooms allowed at once. |
+| `MAX_CONN_PER_IP` | `8` | Open connections allowed from one IP address. |
+| `TRUST_PROXY` | *(unset)* | Set to `1` when running behind a reverse proxy (Caddy, Render, Fly…) so per-IP limits use `X-Forwarded-For`. Leave unset when the server is exposed directly. |
+| `ALLOWED_ORIGINS` | *(unset)* | Extra comma-separated site origins allowed to open game connections. The server's own address and `PUBLIC_URL` are always allowed. |
 
 `GET /healthz` returns `{"ok":true,...}` for your host's health check.
 
@@ -63,7 +79,7 @@ Both can deploy straight from the `Dockerfile`. Set `PUBLIC_URL`, then attach yo
 docker build -t gull-heist .
 docker run -d --restart unless-stopped -p 8080:8080 -e PUBLIC_URL=https://yourgame.gg --name gull-heist gull-heist
 ```
-Then install [Caddy](https://caddyserver.com), copy `Caddyfile.example` to `/etc/caddy/Caddyfile`, change the domain, and reload Caddy. It gets the HTTPS certificate on its own and forwards WebSocket traffic without extra setup.
+Add `-e TRUST_PROXY=1` when Caddy sits in front. Then install [Caddy](https://caddyserver.com), copy `Caddyfile.example` to `/etc/caddy/Caddyfile`, change the domain, and reload Caddy. It gets the HTTPS certificate on its own and forwards WebSocket traffic without extra setup.
 
 Point the domain at the VPS with an `A` record (and `AAAA` for IPv6) at your registrar.
 
@@ -77,7 +93,12 @@ DNS changes can take a few minutes to a few hours. Once the site loads over `htt
 
 ## Notes
 
-- Each match runs in one player's browser (the "host") and everyone else follows it. If the host leaves, another player takes over and the match continues.
-- If the host hides the browser tab, the match can pause for everyone until they come back. Browsers slow down background tabs.
-- Scores are trusted from players' browsers, so this is built for playing with friends, not for a public leaderboard.
+- The server runs each match: it keeps the clock, decides which steals count, and keeps the scores. A modified browser can't hand itself points or take over a match. Matches keep going when someone's tab is in the background.
+- The server checks steals against where it last saw your gull and how fast gulls can fly, so teleporting doesn't work.
 - Opening `public/index.html` straight from disk works for solo play only.
+
+## Tests
+
+```bash
+npm test
+```
