@@ -717,7 +717,8 @@ function onNet(m){
     case 'welcome':
       net.me=m.you;net.room=m.room;net.pub=!!m.pub;net.create=false;net.conn=true;net.fails=0;net.full=false;net.clk=null;net.sentSt=null;net.sentProf='';
       tokStore.set({room:m.room,tok:m.tok});
-      try{const u=new URL(location.href);u.search=m.room==='public'?'':'?room='+encodeURIComponent(m.room);history.replaceState(null,'',u.toString());}catch(e){}
+      try{const u=new URL(location.href),q=new URLSearchParams();if(m.room!=='public')q.set('room',m.room);if(DEBUG)q.set('debug','1');
+        u.search=q.toString();history.replaceState(null,'',u.toString());}catch(e){}
       $('roomCode').value=m.room==='public'?'':m.room;
       updateMpBtn();break;
     case 'lobby':
@@ -1413,15 +1414,46 @@ function trackRes(ms,iv){
   const w=res.win.sort((a,b)=>a-b),med=w[w.length>>1];res.win.length=0;res.winAt=t;
   if(res.settle){res.settle--;return;}
   if(res.pending){const p=res.pending;res.pending=null;
-    if(med>p.before*0.85){setRes(p.from);res.noDownUntil=t+120000;return;}} // didn't help: undo
+    if(med>p.before*0.85){dbgLog(`undo: ${Math.round(med)} vs ${Math.round(p.before)} ms, no gain`);setRes(p.from);res.noDownUntil=t+120000;return;}} // didn't help: undo
   const lv=resLevel();
   if(med>iv*1.32){res.good=0;
     if(lv<RES_LEVELS.length-1&&t>=res.noDownUntil){
       if(t-res.upAt<5000)res.noUpUntil=t+60000;
-      res.pending={from:res.i,before:med};setRes(lv+1);}}
-  else if(med<iv*1.08){if(++res.good>=5&&lv>(saver?SAVER_LEVEL:0)&&t>=res.noUpUntil){res.good=0;res.upAt=t;setRes(lv-1);}}
+      dbgLog(`down to ${RES_LEVELS[lv+1]*100}%: ${Math.round(med)} ms`);res.pending={from:res.i,before:med};setRes(lv+1);}}
+  else if(med<iv*1.08){if(++res.good>=5&&lv>(saver?SAVER_LEVEL:0)&&t>=res.noUpUntil){dbgLog(`up to ${RES_LEVELS[lv-1]*100}%`);res.good=0;res.upAt=t;setRes(lv-1);}}
   else res.good=0;
 }
+
+// ================= debug overlay (?debug in the address) =================
+// Shows what the browser and the game are doing, for tracking down a slow device.
+const DEBUG=(()=>{try{return new URLSearchParams(location.search).has('debug');}catch(e){return false;}})();
+const dbg=DEBUG?{el:null,raf:[],drawn:[],work:[],log:[],lastRaf:0,lastDrawn:0,shownAt:0,gpu:gpuName()}:null;
+function gpuName(){try{const g=document.createElement('canvas').getContext('webgl');if(!g)return'no WebGL';
+  const e=g.getExtension('WEBGL_debug_renderer_info'),n=g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER);
+  const l=g.getExtension('WEBGL_lose_context');if(l)l.loseContext();return String(n);}catch(e){return'?';}}
+function dbgLog(s){if(!dbg)return;dbg.log.push(`${Math.round(now()/1000)}s ${s}`);if(dbg.log.length>4)dbg.log.shift();}
+const dbgPush=(a,v)=>{a.push(v);if(a.length>120)a.shift();};
+function dbgPct(a,q){if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(s.length*q))];}
+// every animation frame the browser offers, drawn or not: its spacing is the screen's refresh rate
+function dbgRaf(ts){
+  if(dbg.lastRaf)dbgPush(dbg.raf,ts-dbg.lastRaf);dbg.lastRaf=ts;
+  if(ts-dbg.shownAt<500)return;dbg.shownAt=ts;
+  if(!dbg.el){dbg.el=document.createElement('pre');document.body.appendChild(dbg.el);
+    dbg.el.style.cssText='position:fixed;left:6px;bottom:6px;z-index:99;margin:0;padding:6px 8px;max-width:calc(100% - 24px);'+
+      'font:11px/1.35 ui-monospace,monospace;color:#fffaf0;background:rgba(29,35,48,.82);border-radius:8px;pointer-events:none;white-space:pre-wrap';}
+  const rm=dbgPct(dbg.raf,0.5),dm=dbgPct(dbg.drawn,0.5),t=now();
+  const ua=(navigator.userAgent.match(/(Firefox|Chrome|Safari)\/[\d]+/)||['?'])[0];
+  dbg.el.textContent=[
+    `screen   ${rm?Math.round(1000/rm):'?'} Hz (${rm.toFixed(1)} ms between browser frames)`,
+    `drawn    ${dm?Math.round(1000/dm):0} fps · median ${dm.toFixed(1)} ms · p95 ${dbgPct(dbg.drawn,0.95).toFixed(1)} ms`,
+    `target   ${Math.round(1000/frameInterval())} fps · battery saver ${saver?'on':'off'} · ${mode}`,
+    `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms per drawn frame`,
+    `res      ${RES_LEVELS[resLevel()]*100}% · ${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
+    `adaptive ${res.pending?'judging a step down':'steady'}${t<res.noDownUntil?` · no step down for ${Math.ceil((res.noDownUntil-t)/1000)}s`:''}${t<res.noUpUntil?` · no step up for ${Math.ceil((res.noUpUntil-t)/1000)}s`:''}`,
+    `gpu      ${dbg.gpu}`,`browser  ${ua}`,
+    ...dbg.log.map(s=>'log      '+s)].join('\n');
+}
+function dbgFrame(ts,work){if(dbg.lastDrawn)dbgPush(dbg.drawn,ts-dbg.lastDrawn);dbg.lastDrawn=ts;dbgPush(dbg.work,work);}
 
 // ================= loop =================
 // Frames are capped at 60 fps in play and 30 in menus or with battery saver on; 90-120 Hz
@@ -1431,15 +1463,18 @@ let nextFrameAt=0;
 const frameInterval=()=>(mode==='solo'||mode==='play')&&!paused&&!menuOpen&&!saver?1000/60:1000/30;
 function frame(ts){
   requestAnimationFrame(frame);
+  if(dbg)dbgRaf(ts);
   const iv=frameInterval();
   if(ts<nextFrameAt-2)return;
   nextFrameAt=ts-nextFrameAt>iv?ts+iv:nextFrameAt+iv;
+  const w0=dbg?performance.now():0;
   const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackRes(ts-last,iv);last=ts;
   if(!paused)update(dt,Math.min(1,raw));
   // a frozen scene (solo pause) or a menu card over most of a narrow screen: keep the last city frame
   if(bgDraws<=0&&(paused||shownScreen&&mode!=='solo'&&mode!=='play'&&VW<660)){drawPreviews();return;}
   if(bgDraws>0)bgDraws--;
   render();
+  if(dbg)dbgFrame(ts,performance.now()-w0);
 }
 requestAnimationFrame(frame);
 })();
