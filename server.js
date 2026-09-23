@@ -171,7 +171,7 @@ function matchMsg(room, p) {
   const m = room.match, M = m.M, mt = roomMt(m);
   if (!p.pl || p.plMatch !== M.id) {
     const sp = GH.spawnPoint(M.seed, room.nextSlot++);
-    p.pl = GH.newPlayer(p.id); p.plMatch = M.id; p.x = sp.x; p.y = sp.y; p.posAt = Date.now();
+    p.pl = GH.newPlayer(p.id); p.plMatch = M.id; p.x = sp.x; p.y = sp.y; p.posAt = Date.now(); p.pt = mt;
   }
   if (!(p.id in M.sc)) M.sc[p.id] = 0;
   const sp = { x: Math.round(p.x), y: Math.round(p.y) };
@@ -241,8 +241,12 @@ function handle(room, p, m) {
     }
     case 'pos': {
       if (!num(m.x, 0, GH.W) || !num(m.y, 0, GH.W) || !num(m.h, -10, 10) || !num(m.a, 0, 1)) return false;
+      if (m.mt !== undefined && !num(m.mt, -10, 1000)) return false;
       const now = Date.now();
       if (!room.match || p.plMatch !== room.match.M.id || p.st !== 'play') return true;
+      // when the sender sampled this position, so others can interpolate on real times
+      const mt = roomMt(room.match);
+      p.pt = m.mt === undefined ? mt : Math.max(mt - 0.5, Math.min(mt, m.mt));
       { // never let a reported position move faster than a gull can fly
         const dt = Math.min(0.25, (now - p.posAt) / 1000), lim = MAX_SPEED * dt + 10;
         const dx = m.x - p.x, dy = m.y - p.y, d = Math.hypot(dx, dy);
@@ -403,11 +407,16 @@ const loop = setInterval(() => {
     for (const p of room.players.values()) {
       if (p.pl && p.plMatch === m.M.id) {
         if (GH.tickPlayer(p.pl, mt)) send(p, { t: 'res', seq: 0, k: 'up', f: p.pl.feathers, ground: 0 });
-        if (p.ws && p.st === 'play' && p.x != null) ps.push([p.id, Math.round(p.x), Math.round(p.y), Math.round(p.h * 100) / 100, Math.round(p.a * 100) / 100, p.pl.groundUntil > mt ? 1 : 0]);
+        if (p.ws && p.st === 'play' && p.x != null) ps.push([p.id, Math.round(p.x), Math.round(p.y), Math.round(p.h * 100) / 100, Math.round(p.a * 100) / 100, p.pl.groundUntil > mt ? 1 : 0, Math.round((p.pt ?? mt) * 1000) / 1000]);
       }
     }
-    broadcast(room, { t: 's', id: m.M.id, mt: Math.round(mt * 1000) / 1000, p: ps, sc }, p => p.st === 'play', true);
-    if (tickN % 15 === 0) sendLobby(room);
+    // scores only change on a steal; resend once a second anyway for players who just joined
+    const s = { t: 's', id: m.M.id, mt: Math.round(mt * 1000) / 1000, p: ps };
+    const scJson = JSON.stringify(sc);
+    if (scJson !== m.scSent || tickN % 15 === 0) { s.sc = sc; m.scSent = scJson; }
+    broadcast(room, s, p => p.st === 'play', true);
+    // players mid-match already get lobby changes as they happen; the clock refresh is for the lobby screen
+    if (tickN % 15 === 0) broadcast(room, lobbyMsg(room), p => p.st !== 'play');
   }
   if (tickN % 900 === 0) { recentPerIp.clear(); roomsCreatedPerIp.clear(); } // once a minute
 }, TICK_MS);
