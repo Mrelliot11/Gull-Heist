@@ -263,3 +263,138 @@ test('reconnecting with the token resumes the same player', async () => {
   const other = await hello('/ws?create=1', 'Bob', tok);
   assert.notEqual(other.welcome.you, you);
 });
+
+// ---- modes and power-ups. Setup reaches into the server's rooms to skip the countdown and
+// put gulls in place; everything under test goes through real messages. ----
+const { rooms } = require('../server.js');
+const srv = (room, c) => rooms.get(room).players.get(c.welcome.you);
+function skipCountdown(room, sec) { rooms.get(room).match.t0 -= (GH.COUNTDOWN + sec) * 1000; }
+async function newRoom(opts) {
+  const L = await hello('/ws?create=1', 'Lead'), room = L.welcome.room;
+  const F = await hello(`/ws?room=${room}`, 'Flock');
+  for (const c of [L, F]) c.send({ t: 'st', st: 'lobby' });
+  await L.wait(m => m.t === 'lobby' && m.members.length === 2 && m.members.every(p => p.st === 'lobby'));
+  if (opts) {
+    L.send({ t: 'opts', ...opts });
+    await L.wait(m => m.t === 'lobby' && m.opts && m.opts.mode === opts.mode && m.opts.pu === !!opts.pu);
+  }
+  L.send({ t: 'start' });
+  const mL = await L.wait(m => m.t === 'match'), mF = await F.wait(m => m.t === 'match');
+  for (const c of [L, F]) c.send({ t: 'st', st: 'play' });
+  await L.wait(m => m.t === 's' && m.p.length === 2);
+  return { L, F, room, mL, mF };
+}
+async function done(...cs) { for (const c of cs) { c.ws.close(); await c.closed; } }
+
+test('only the leader picks the mode; Rush is solo only', async () => {
+  const L = await hello('/ws?create=1', 'Lead'), room = L.welcome.room;
+  const F = await hello(`/ws?room=${room}`, 'Flock');
+  const l0 = await F.wait(m => m.t === 'lobby' && m.members.length === 2);
+  assert.deepEqual(l0.opts, { mode: 'classic', pu: true });
+  let at = F.mark();
+  F.send({ t: 'opts', mode: 'frenzy', pu: false });
+  assert.match((await F.wait(m => m.t === 'err', at)).m, /leader/);
+  at = F.mark();
+  L.send({ t: 'opts', mode: 'rush', pu: true });
+  L.send({ t: 'opts', mode: 'frenzy', pu: false });
+  const l = await F.wait(m => m.t === 'lobby' && m.opts.mode !== 'classic', at);
+  assert.deepEqual(l.opts, { mode: 'frenzy', pu: false });
+  for (const c of [L, F]) c.send({ t: 'st', st: 'lobby' });
+  await L.wait(m => m.t === 'lobby' && m.members.every(p => p.st === 'lobby'));
+  L.send({ t: 'start' });
+  const m = await F.wait(m => m.t === 'match');
+  assert.equal(m.mode, 'frenzy');
+  assert.equal(m.dur, GH.MODES.frenzy.dur);
+  assert.equal(m.pu, 0);
+  assert.equal(m.cnt.length, GH.createMatch(m.id, m.seed, m.dur, { mode: m.mode }).ents.length);
+  await done(L, F);
+});
+
+test('a power-up is taken only near where the server sees the gull, and only once', async () => {
+  const { L, F, room, mL } = await newRoom({ mode: 'classic', pu: true });
+  const M = GH.createMatch(mL.id, mL.seed, mL.dur, { mode: mL.mode, pu: !!mL.pu });
+  assert.equal(mL.pu, 1);
+  const s = M.pus[0];
+  skipCountdown(room, s.t0 + 0.5);
+  const pL = srv(room, L), pF = srv(room, F);
+  // far away: claiming the spot in the message changes nothing, the server's own position counts
+  pL.x = s.x + 300; pL.y = s.y;
+  let at = L.mark();
+  L.send({ t: 'pick', k: 0, x: s.x, y: s.y });
+  assert.equal((await L.wait(m => m.t === 'pu' && m.k === 0, at)).no, 'far');
+  // close by: everyone hears who got it
+  pL.x = s.x + 10; pL.y = s.y;
+  at = F.mark();
+  L.send({ t: 'pick', k: 0 });
+  const ev = await F.wait(m => m.t === 'pu' && m.k === 0 && m.by, at);
+  assert.equal(ev.by, L.welcome.you);
+  assert.equal(ev.type, s.type);
+  // and it's gone for the next gull
+  pF.x = s.x; pF.y = s.y;
+  at = F.mark();
+  F.send({ t: 'pick', k: 0 });
+  assert.equal((await F.wait(m => m.t === 'pu' && m.k === 0 && m.no, at)).no, 'gone');
+  await done(L, F);
+});
+
+test('the speed check allows a tailwind, and only a tailwind', async () => {
+  const { L, room } = await newRoom();
+  skipCountdown(room, 1);
+  const p = srv(room, L), mt = () => (Date.now() - rooms.get(room).match.t0) / 1000 - GH.COUNTDOWN;
+  const hop = async () => {
+    const x0 = p.x;
+    p.posAt = Date.now() - 200;
+    L.send({ t: 'pos', x: Math.min(GH.W - 1, x0 + 400), y: p.y, h: 0, a: 1 });
+    await sleep(100);
+    return p.x - x0;
+  };
+  p.x = 400;
+  const plain = await hop();
+  assert.ok(plain > 100 && plain < 180, `moved ${plain}`);
+  p.pl.fx.wind = mt() + 5;
+  const windy = await hop();
+  assert.ok(windy > 195 && windy < 300, `moved ${windy} with a tailwind`);
+  await done(L);
+});
+
+test('Golden Chip: picked up at home, snatched by a swoop, and it pays its carrier', async () => {
+  const { L, F, room, mL } = await newRoom({ mode: 'gold', pu: false });
+  assert.equal(mL.mode, 'gold');
+  assert.deepEqual(mL.g, [0, GH.GOLD_HOME.x, GH.GOLD_HOME.y]);
+  skipCountdown(room, 1);
+  const pL = srv(room, L), pF = srv(room, F), H = GH.GOLD_HOME;
+  pL.x = H.x + 5; pL.y = H.y;
+  let at = F.mark();
+  L.send({ t: 'gold' });
+  const pick = await F.wait(m => m.t === 'gold', at);
+  assert.deepEqual([pick.k, pick.by], ['pick', L.welcome.you]);
+  await F.wait(m => m.t === 's' && m.g && m.g[0] === L.welcome.you, at);
+
+  // F is far, then close but inside the carrier's safe moment: nothing happens
+  pF.x = H.x + 400; pF.y = H.y;
+  at = F.mark();
+  F.send({ t: 'gold' });
+  await sleep(300);
+  pF.x = H.x + 20;
+  F.send({ t: 'gold' });
+  await sleep(200);
+  assert.ok(!F.log.slice(at).some(m => m.t === 'gold'));
+
+  // pays by the second
+  const G = rooms.get(room).match.M.gold;
+  G.at -= 2;
+  await F.wait(m => m.t === 's' && m.sc && m.sc[L.welcome.you] >= 2 * GH.GOLD_PTS, at);
+
+  G.safe = 0;
+  await sleep(100);
+  F.send({ t: 'gold' });
+  const mug = await L.wait(m => m.t === 'gold' && m.k === 'mug');
+  assert.deepEqual([mug.by, mug.from], [F.welcome.you, L.welcome.you]);
+
+  // the carrier leaving drops the chip where they were
+  at = L.mark();
+  F.ws.close(); await F.closed;
+  const drop = await L.wait(m => m.t === 'gold' && m.k === 'drop', at);
+  assert.equal(drop.x, Math.round(pF.x));
+  await done(L);
+});

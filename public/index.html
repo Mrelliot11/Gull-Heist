@@ -124,6 +124,30 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 .rank .pos{font-family:"Titan One",sans-serif;font-size:18px}
 .rank .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rank li.me .nm::after{content:" (you)";color:var(--muted);font-size:12px}
+.modes{display:flex;gap:6px;flex-wrap:wrap}
+.mode{flex:1 1 0;min-width:84px;font-family:"Titan One",sans-serif;font-size:15px;line-height:1.1;padding:7px 6px 6px;border-radius:12px;border:3px solid var(--ink);background:#fff;
+  box-shadow:2px 2px 0 var(--ink);cursor:pointer;color:var(--ink)}
+.mode small{display:block;font-family:Nunito,system-ui,sans-serif;font-weight:800;font-size:10px;color:var(--muted);margin-top:2px}
+.mode[aria-pressed="true"]{background:#ffd23f}
+.mode:active{transform:translate(2px,2px);box-shadow:none}
+.mode:disabled{cursor:default;opacity:.55;transform:none;box-shadow:2px 2px 0 var(--ink)}
+.mode:disabled[aria-pressed="true"]{opacity:1}
+.fxbar{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.fx{position:relative;overflow:hidden;display:flex;align-items:center;gap:5px;background:var(--paper);border:2.5px solid var(--ink);border-radius:10px;box-shadow:2px 2px 0 var(--ink);
+  padding:2px 8px 4px 5px;font-weight:900;font-size:11px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.fx .dot{width:12px;height:12px}
+.fx i{position:absolute;left:0;bottom:0;height:3px;background:var(--ink)}
+.daily{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;padding:8px 10px;border:2.5px dashed var(--ink);border-radius:12px;background:#fff6dc;font-weight:800;font-size:13px}
+.daily b{font-weight:900;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.daily.done{background:#d9f0cf}
+.loot.stats li{background:#e9f5f9}
+.loot.news li{background:#ffd23f}
+.trophies{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:55vh;overflow-y:auto}
+.trophies li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:center;padding:7px 10px;border:2.5px solid var(--ink);border-radius:12px;background:#fff;font-weight:800;font-size:13px}
+.trophies li b{display:block;font-family:"Titan One",sans-serif;font-weight:400;font-size:15px}
+.trophies li span.cup{font-family:"Titan One",sans-serif;font-size:18px;text-align:center;opacity:.25}
+.trophies li.got{background:#fff6dc}
+.trophies li.got span.cup{opacity:1;color:#e0a400}
 @media (prefers-reduced-motion: reduce){ .feathers svg{transition:none} }
 </style>
 </head>
@@ -135,6 +159,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
   <div class="hud-left">
     <div class="pill disp"><small>Loot</small><span id="score">0</span></div>
     <div class="pill disp combo" id="combo" hidden>x2</div>
+    <div class="fxbar" id="fxbar" aria-label="Power-ups"></div>
     <ol class="board" id="board" hidden aria-label="Scores"></ol>
   </div>
   <div class="hud-mid">
@@ -162,18 +187,21 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
       <li><span class="rk c">3</span><span><b>Come in from behind.</b> Everyone watches the cone in front of them. Regular folks (white cone) shoo you off. Grumps (red) and cart vendors (yellow) swat you: three swats and you're grounded.</span></li>
       <li><span class="rk c">!</span><span><b>Robbed people stay alert</b> for a few seconds: their cone widens and they turn to face the nearest gull.</span></li>
       <li><span class="rk d">4</span><span><b>Chain steals</b> within 3 seconds for up to x5 loot.</span></li>
+      <li><span class="rk b">★</span><span><b>Fly through power-ups</b>: tailwind, camouflage, big beak, shield feather, double loot and screech.</span></li>
     </ul>
+    <div class="field"><label id="modeLabel">Solo mode</label><div class="modes" id="soloModes" role="group" aria-labelledby="modeLabel"></div></div>
     <div class="row">
       <button class="btn" id="playBtn">Fly solo</button>
       <button class="btn alt" id="mpBtn" disabled>Multiplayer</button>
     </div>
     <div class="row"><button class="btn ghost wardbtn" id="wardBtn"><canvas id="titlePrev" width="96" height="96" aria-hidden="true"></canvas>Customize your gull</button></div>
     <p class="note" id="mpNote">Checking for other players…</p>
+    <p class="daily" id="daily"></p>
     <div class="row" style="justify-content:space-between">
-      <p class="best" id="bestTitle">Best solo haul: 0</p>
-      <div class="row"><button class="btn ghost ctrlBtn" id="ctrlBtn" hidden>Controls: Mouse</button><button class="btn ghost" id="soundBtn" aria-pressed="true">Sound on</button></div>
+      <p class="best" id="bestTitle">Best Classic haul: 0</p>
+      <div class="row"><button class="btn ghost ctrlBtn" id="ctrlBtn" hidden>Controls: Mouse</button><button class="btn ghost soundBtn" aria-pressed="true">Sound on</button></div>
     </div>
-    <div class="row"><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
+    <div class="row"><button class="btn ghost puBtn" id="soloPu" aria-pressed="true">Power-ups: on</button><button class="btn ghost" id="trophyBtn">Trophies</button><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
   </div>
 </section>
 
@@ -188,6 +216,11 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     <div class="field">
       <label>In the lobby</label>
       <ul class="flock" id="flock"></ul>
+    </div>
+    <div class="field">
+      <label id="mpModeLabel">Mode</label>
+      <div class="modes" id="mpModes" role="group" aria-labelledby="mpModeLabel"></div>
+      <div class="row"><button class="btn ghost puBtn" id="mpPu" aria-pressed="true">Power-ups: on</button></div>
     </div>
     <p class="status" id="lobbyStatus">Anyone here can start. Everyone in the lobby flies together.</p>
     <div class="row">
@@ -243,7 +276,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     <h2 class="over-h disp" id="pauseTitle">Perched</h2>
     <p class="tag" style="text-align:center" id="pauseText">The fries will wait. Probably.</p>
     <div class="row"><button class="btn" id="resumeBtn">Resume</button><button class="btn ghost" id="quitBtn">Quit</button></div>
-    <div class="row" style="justify-content:center;margin-top:10px"><button class="btn ghost ctrlBtn" id="ctrlBtnP" hidden>Controls: Mouse</button><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
+    <div class="row" style="justify-content:center;margin-top:10px"><button class="btn ghost ctrlBtn" id="ctrlBtnP" hidden>Controls: Mouse</button><button class="btn ghost soundBtn" aria-pressed="true">Sound on</button><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
   </div>
 </section>
 
@@ -254,6 +287,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     <p class="bigscore disp" id="overScore">0</p>
     <p class="best" id="overBest">Best solo haul: 0</p>
     <ul class="loot" id="lootList"></ul>
+    <ul class="loot stats" id="overStats" aria-label="Match stats"></ul>
+    <ul class="loot news" id="overNews" hidden></ul>
     <div class="row"><button class="btn" id="againBtn">Fly again</button><button class="btn ghost" id="overMenu">Menu</button></div>
   </div>
 </section>
@@ -263,8 +298,18 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     <h2 class="over-h disp" id="resTitle">Results</h2>
     <ol class="rank" id="rankList"></ol>
     <ul class="loot" id="resLoot"></ul>
+    <ul class="loot stats" id="resStats" aria-label="Match stats"></ul>
+    <ul class="loot news" id="resNews" hidden></ul>
     <div class="row"><button class="btn" id="resLobby">Back to lobby</button><button class="btn ghost" id="resMenu">Menu</button></div>
     <p class="note" style="text-align:center">When anyone starts the next match, everyone in the lobby or on this screen joins it.</p>
+  </div>
+</section>
+
+<section class="overlay" id="trophyScreen" hidden>
+  <div class="card">
+    <h2 class="over-h disp" style="text-align:left">Trophies</h2>
+    <ul class="trophies" id="trophyList"></ul>
+    <div class="row"><button class="btn" id="trophyDone">Back</button></div>
   </div>
 </section>
 
@@ -495,10 +540,27 @@ let mp=false;          // in the multiplayer flow
 let paused=false;
 let menuOpen=false;    // the pause/menu overlay is up: locks this player's own controls in every mode
 const bird={x:1300,y:1300,px:1300,py:1300,vx:90,vy:0,h:0,alt:1,flap:0,swoopT:-1,cd:0,stunT:0,inv:0,grabbed:false,cand:null,carry:null,carryT:0,spin:0,groundT:0};
-let feathers=3,combo=0,comboT=0,loot={},best=+store.get('gullheist.best',0)||0;
-let camX=1300,camY=1300,camL=0,camT=0,shakeT=0,T=0,last=now();
-const floats=[],parts=[];
-let mySeq=0,pending=new Map(),hideFood=new Map(),joinedId=null,soloPl=null,netPl=null,aim=-1,aimK='',lastCountBeep=99;
+let feathers=3,combo=0,comboT=0,loot={};
+let camX=1300,camY=1300,camL=0,camT=0,shakeT=0,hitStop=0,T=0,last=now();
+const floats=[],parts=[],rings=[];
+// game modes (GH.MODES) and power-ups, remembered per browser. Classic keeps the old best-score key.
+let soloMode=store.get('gullheist.mode','classic');if(!GH.MODES[soloMode]||!GH.MODES[soloMode].solo)soloMode='classic';
+let puOn=store.get('gullheist.pu','1')!=='0';
+const bestKey=m=>m==='classic'?'gullheist.best':'gullheist.best.'+m;
+const bestOf=m=>+store.get(bestKey(m),0)||0;
+// this match's numbers, for the summary, trophies and the daily challenge
+let stats={};
+function resetStats(){stats={steals:0,carts:0,grumps:0,combo:0,pus:0,swats:0,blocks:0,gold:0};}
+resetStats();
+// screen shake, unless the player asked for less motion
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function shake(s){if(!RM)shakeT=Math.max(shakeT,s);}
+// big text in the middle of the screen: combos, power-ups, the chip
+let ann=null;
+function announce(txt,c){ann={txt,col:c||'#ffd23f',t:0};}
+let mySeq=0,pending=new Map(),hideFood=new Map(),joinedId=null,soloPl=null,netPl=null,aim=-1,aimK='',lastCountBeep=99,lastLeftBeep=99;
+const puHide=new Map(); // power-up -> time until which a pickup we asked the server for stays hidden
+let goldSentAt=0;
 let nick=GH.cleanNick(store.get('gullheist.nick','')||('Gull '+(100+((rnd()*900)|0))));
 let col=store.get('gullheist.col','');if(!COLS.includes(col))col=pick(COLS);
 let look=(()=>{try{return GH.cleanLook(JSON.parse(store.get('gullheist.look','null')));}catch(e){return GH.cleanLook(null);}})();
@@ -507,7 +569,7 @@ function setAttract(){const M=GH.createMatch('attract',77,1e9);M.fu=M.fu.map(()=
 setAttract();
 
 // ================= audio =================
-let AC=null,sound=true;
+let AC=null,sound=store.get('gullheist.sound','1')!=='0';
 function ensureAudio(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}if(AC&&AC.state==='suspended')AC.resume();}
 function tone(f1,f2,dur,type,vol,delay){if(!AC||!sound)return;const t=AC.currentTime+(delay||0);const o=AC.createOscillator(),g=AC.createGain();o.type=type||'square';
   o.frequency.setValueAtTime(f1,t);o.frequency.exponentialRampToValueAtTime(f2,t+dur);g.gain.setValueAtTime(vol||0.06,t);g.gain.exponentialRampToValueAtTime(0.0008,t+dur);
@@ -521,8 +583,17 @@ const sfx={
   squawk:()=>{tone(1300,700,0.12,'sawtooth',0.04);tone(1200,650,0.14,'sawtooth',0.04,0.14);},
   miss:()=>tone(400,250,0.18,'triangle',0.06),
   beep:(hi)=>tone(hi?1320:660,hi?1320:660,0.12,'square',0.05),
-  end:()=>{tone(700,350,0.3,'triangle',0.08);tone(500,250,0.4,'triangle',0.08,0.25);}
+  end:()=>{tone(700,350,0.3,'triangle',0.08);tone(500,250,0.4,'triangle',0.08,0.25);},
+  pu:()=>{tone(660,1320,0.12,'triangle',0.07);tone(990,1980,0.14,'triangle',0.06,0.08);},
+  block:()=>{tone(300,900,0.15,'square',0.05);noise(0.08,0.25);},
+  screech:()=>{tone(1900,500,0.4,'sawtooth',0.05);tone(1500,420,0.4,'sawtooth',0.04,0.06);},
+  gold:()=>[0,0.07,0.14].forEach((d,i)=>tone(880+i*220,900+i*220,0.13,'triangle',0.07,d)),
+  lose:()=>tone(620,180,0.35,'square',0.05),
+  tick:()=>tone(1500,1500,0.05,'square',0.03),
+  trophy:()=>[523,659,784,1047].forEach((f,i)=>tone(f,f,0.14,'triangle',0.06,i*0.09))
 };
+function setSound(v){sound=v;store.set('gullheist.sound',v?'1':'0');
+  document.querySelectorAll('.soundBtn').forEach(b=>{b.textContent=sound?'Sound on':'Sound off';b.setAttribute('aria-pressed',sound);});}
 
 // ================= input =================
 const joy={id:null,ox:0,oy:0,x:0,y:0,vx:0,vy:0,t0:0,moved:0};
@@ -560,6 +631,7 @@ addEventListener('keydown',e=>{
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();
   if((e.code==='Space'||(kbd()&&(k==='j'||k==='k')))&&playing())trySwoop();
   if(k==='escape'||k==='p'){if(mode==='solo'||mode==='play')openMenu(!paused&&$('pauseScreen').hidden);}
+  if(k==='m')setSound(!sound);
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
@@ -576,9 +648,9 @@ function renderCtrl(){if(!fine)return;const kb=ctrl==='keys';
 document.querySelectorAll('.ctrlBtn').forEach(b=>b.addEventListener('click',()=>{ctrl=ctrl==='keys'?'mouse':'keys';store.set('gullheist.controls',ctrl);renderCtrl();}));
 const FEATHER='<svg viewBox="0 0 24 24"><path d="M20 3C12 4 6 9 5 17l-2 4 1 .6 2.2-3.6C14 17 19 11 20 3z" fill="#fff" stroke="#1d2330" stroke-width="1.8" stroke-linejoin="round"/><path d="M6.5 17.5C10 13 13 9.5 17 6" fill="none" stroke="#1d2330" stroke-width="1.4" stroke-linecap="round"/><path d="M17 4.5c.9.2 1.8.8 2.3 1.3" stroke="#1d2330" stroke-width="2.4" stroke-linecap="round"/></svg>';
 function renderFeathers(){feathersEl.innerHTML='';for(let i=0;i<3;i++){const s=document.createElement('span');s.innerHTML=FEATHER;const svg=s.firstChild;if(i>=feathers)svg.classList.add('lost');feathersEl.appendChild(svg);}}
-function updateBest(){$('bestTitle').textContent='Best solo haul: '+best;}
+function updateBest(){$('bestTitle').textContent='Best '+GH.MODES[soloMode].n+' haul: '+bestOf(soloMode);}
 updateBest();
-const screens=['titleScreen','lobbyScreen','wardScreen','pauseScreen','overScreen','resultsScreen'];
+const screens=['titleScreen','lobbyScreen','wardScreen','pauseScreen','overScreen','resultsScreen','trophyScreen'];
 let shownScreen='titleScreen'; // the page opens on it
 function show(id){screens.forEach(s=>$(s).hidden=s!==id);shownScreen=id;bgDraws=2;}
 function setHud(on){hud.hidden=!on;swoopBtn.hidden=!on;if(!on){hintEl.hidden=true;joy.id=null;}}
@@ -589,7 +661,11 @@ $('mpBtn').addEventListener('click',()=>{ensureAudio();toLobby();});
 $('lobbyBack').addEventListener('click',toTitle);
 $('resLobby').addEventListener('click',toLobby);
 $('resMenu').addEventListener('click',toTitle);
-$('soundBtn').addEventListener('click',()=>{sound=!sound;$('soundBtn').textContent=sound?'Sound on':'Sound off';$('soundBtn').setAttribute('aria-pressed',sound);});
+document.querySelectorAll('.soundBtn').forEach(b=>b.addEventListener('click',()=>{setSound(!sound);if(sound){ensureAudio();sfx.pu();}}));
+setSound(sound);
+$('soloPu').addEventListener('click',()=>{puOn=!puOn;store.set('gullheist.pu',puOn?'1':'0');renderSoloModes();});
+$('trophyBtn').addEventListener('click',()=>{renderTrophies();show('trophyScreen');});
+$('trophyDone').addEventListener('click',()=>show('titleScreen'));
 function renderSaver(){document.querySelectorAll('.saverBtn').forEach(b=>{b.textContent='Battery saver: '+(saver?'on':'off');b.setAttribute('aria-pressed',saver);});}
 document.querySelectorAll('.saverBtn').forEach(b=>b.addEventListener('click',()=>{saver=!saver;store.set('gullheist.saver',saver?'1':'0');
   res.pending=null;res.win.length=0;res.winAt=0;res.good=0;renderSaver();applyRes();}));
@@ -605,6 +681,75 @@ function openMenu(v){
   else $('pauseScreen').hidden=true;
   paused=v&&mode==='solo';menuOpen=v;bgDraws=2;if(!v)last=now();
 }
+// mode pickers: the solo one on the title screen, the room's in the lobby (leader only)
+const MODE_TXT={classic:'90 s, the original',frenzy:'60 s, crowds, fast refills',rush:'30 s, steals add time',gold:'carry the chip to score'};
+function renderModes(el,sel,list,can,pick){el.innerHTML='';
+  for(const k of list){const b=document.createElement('button');b.className='mode';b.setAttribute('aria-pressed',k===sel);b.disabled=!can;
+    b.textContent=GH.MODES[k].n;const d=document.createElement('small');d.textContent=MODE_TXT[k];b.appendChild(d);
+    b.addEventListener('click',()=>pick(k));el.appendChild(b);}}
+function renderPu(b,on,can){b.textContent='Power-ups: '+(on?'on':'off');b.setAttribute('aria-pressed',on);b.disabled=!can;}
+function renderSoloModes(){
+  renderModes($('soloModes'),soloMode,Object.keys(GH.MODES).filter(k=>GH.MODES[k].solo),true,k=>{soloMode=k;store.set('gullheist.mode',k);renderSoloModes();});
+  renderPu($('soloPu'),puOn,true);updateBest();}
+renderSoloModes();
+
+// ================= trophies and the daily challenge =================
+// Checked against a finished match's stats: {steals,carts,grumps,combo,pus,swats,blocks,gold,
+// mode,score,time,full (ran to the end),won (beat other gulls)}. Kept in this browser only.
+const TROPHIES=[
+  ['first','First bite','Steal anyone\'s lunch',s=>s.steals>0],
+  ['combo5','Chain gang','Hit a x5 combo',s=>s.combo>=5],
+  ['cart3','Cart shark','Raid 3 carts in one match',s=>s.carts>=3],
+  ['grump5','Grump tax','Rob 5 grumps in one match',s=>s.grumps>=5],
+  ['clean','Untouchable','Haul 300+ in Classic without a single swat',s=>s.mode==='classic'&&s.full&&s.swats===0&&s.score>=300],
+  ['pu5','Power hungry','Grab 5 power-ups in one match',s=>s.pus>=5],
+  ['block','Not today','Block a swat with a shield feather',s=>s.blocks>0],
+  ['rush90','Marathon','Keep a Rush going for 90 seconds',s=>s.mode==='rush'&&s.time>=90],
+  ['k1','Four figures','Haul 1000 in one match',s=>s.score>=1000],
+  ['gold20','Golden touch','Carry the Golden Chip for 20 seconds in one match',s=>s.gold>=20],
+  ['win','Top gull','Win a match against other gulls',s=>s.won],
+];
+const DAILY=[
+  {txt:'Haul 400 in Classic',f:s=>s.mode==='classic'&&s.score>=400},
+  {txt:'Hit a x4 combo',f:s=>s.combo>=4},
+  {txt:'Raid 2 carts in one match',f:s=>s.carts>=2},
+  {txt:'Grab 4 power-ups in one match',f:s=>s.pus>=4},
+  {txt:'Haul 500 in Frenzy',f:s=>s.mode==='frenzy'&&s.score>=500},
+  {txt:'Keep a Rush going for 60 seconds',f:s=>s.mode==='rush'&&s.time>=60},
+  {txt:'Rob 4 grumps in one match',f:s=>s.grumps>=4},
+  {txt:'Steal 15 lunches in one match',f:s=>s.steals>=15},
+];
+const dayNo=()=>Math.floor((Date.now()-new Date().getTimezoneOffset()*60000)/86400000);
+const todays=()=>DAILY[GH.h32(dayNo(),7,7)%DAILY.length];
+const readJson=(k,d)=>{try{const v=JSON.parse(store.get(k,'null'));return v&&typeof v==='object'?v:d;}catch(e){return d;}};
+function renderDaily(){const d=readJson('gullheist.daily',{}),done=d.day===dayNo(),el=$('daily');
+  const streak=d.day>=dayNo()-1&&d.streak>1?' · '+d.streak+' day streak':'';
+  el.innerHTML='';el.classList.toggle('done',done);
+  const b=document.createElement('b');b.textContent=done?'Daily ✓':'Daily';const t=document.createElement('span');t.textContent=todays().txt+(done?' (done)':'')+streak;
+  el.append(b,t);}
+renderDaily();
+function renderTrophies(){const got=readJson('gullheist.trophies',{}),ul=$('trophyList');ul.innerHTML='';
+  for(const [id,n,d] of TROPHIES){const li=document.createElement('li');if(got[id])li.className='got';
+    const c=document.createElement('span');c.className='cup';c.textContent='★';const t=document.createElement('span');const b=document.createElement('b');b.textContent=n;t.append(b,d);
+    li.append(c,t);ul.appendChild(li);}
+  $('trophyBtn').textContent='Trophies '+Object.keys(got).filter(k=>TROPHIES.some(q=>q[0]===k)).length+'/'+TROPHIES.length;}
+renderTrophies();
+// after a match: new trophies and the daily challenge. Returns the lines for the summary.
+function award(s){const got=readJson('gullheist.trophies',{}),news=[];
+  for(const [id,n,,f] of TROPHIES)if(!got[id]&&f(s)){got[id]=1;news.push('★ '+n);}
+  store.set('gullheist.trophies',JSON.stringify(got));
+  const d=readJson('gullheist.daily',{}),day=dayNo();
+  if(d.day!==day&&todays().f(s)){const streak=d.day===day-1?(d.streak|0)+1:1;store.set('gullheist.daily',JSON.stringify({day,streak}));news.push('Daily done!'+(streak>1?' '+streak+' days':''));}
+  renderTrophies();renderDaily();if(news.length)setTimeout(sfx.trophy,700);
+  return news;}
+function fillStats(ul,newsUl,s){ul.innerHTML='';
+  const rows=[['Steals',s.steals],['Best combo','x'+s.combo],['Carts',s.carts],['Grumps',s.grumps],['Power-ups',s.pus],['Swats',s.swats]];
+  if(s.mode==='rush')rows.unshift(['Lasted',Math.floor(s.time)+' s']);
+  if(s.mode==='gold')rows.push(['Chip held',Math.floor(s.gold)+' s']);
+  for(const [k,v] of rows){const li=document.createElement('li');li.textContent=k+' '+v;ul.appendChild(li);}
+  const news=award(s);newsUl.innerHTML='';newsUl.hidden=!news.length;
+  for(const n of news){const li=document.createElement('li');li.textContent=n;newsUl.appendChild(li);}}
+
 let hintTimer=0;
 function showHint(txt,dur){hintEl.textContent=txt;hintEl.hidden=false;hintEl.style.opacity=1;hintTimer=dur||2.5;}
 const controlsHint=()=>!fine?'Drag to fly · come at them from behind':ctrl==='keys'?'WASD / arrows to fly · Space, J or K to swoop · come at them from behind':'Point to fly · click or Space to swoop · come at them from behind';
@@ -652,21 +797,24 @@ $('startBtn').addEventListener('click',()=>{ensureAudio();const l=net.lobby;
 
 // ================= screens / flow =================
 function resetBird(x,y){Object.assign(bird,{x,y,px:x,py:y,vx:100,vy:0,alt:1,swoopT:-1,cd:0,stunT:0,inv:0,cand:null,carry:null,carryT:0,spin:0,groundT:0});camX=x;camY=y;}
-function resetRound(){feathers=3;combo=0;comboT=0;loot={};floats.length=0;parts.length=0;pending.clear();hideFood.clear();
+function resetRound(){feathers=3;combo=0;comboT=0;loot={};floats.length=0;parts.length=0;rings.length=0;pending.clear();hideFood.clear();puHide.clear();
+  resetStats();ann=null;hitStop=0;lastLeftBeep=99;fxKey='';renderFx();
   renderFeathers();scoreEl.textContent='0';comboEl.hidden=true;timerPill.classList.remove('low');}
 function toTitle(){mp=false;mode='title';paused=false;menuOpen=false;setHud(false);setAttract();show('titleScreen');joinedId=null;updateMpBtn();}
 function startSolo(){
   ensureAudio();mp=false;mode='solo';paused=false;menuOpen=false;
-  const M=GH.createMatch('solo',(rnd()*2**31)|0,GH.DUR);cur={M,ents:M.ents,mt:0};soloPl=GH.newPlayer('me');
+  const M=GH.createMatch('solo',(rnd()*2**31)|0,GH.MODES[soloMode].dur,{mode:soloMode,pu:puOn});cur={M,ents:M.ents,mt:0};soloPl=GH.newPlayer('me');
   resetBird(1300,1300);resetRound();show(null);setHud(true);boardEl.hidden=true;$('pauseBtn').setAttribute('aria-label','Pause');
-  showHint(controlsHint(),3.5);sfx.squawk();
+  showHint(soloMode==='rush'?'Every steal adds time. Keep it going!':controlsHint(),3.5);sfx.squawk();
+  if(soloMode!=='classic')announce(GH.MODES[soloMode].n.toUpperCase()+'!','#ff9f1c');
 }
 function endSolo(reason){
   if(mode!=='solo')return;mode='over';sfx.end();
-  const score=myScore();const isBest=score>best&&score>0;if(isBest){best=score;store.set('gullheist.best',best);}
+  const m=cur.M.mode,score=myScore(),best=bestOf(m),isBest=score>best&&score>0;if(isBest)store.set(bestKey(m),score);
   updateBest();
-  $('overTitle').textContent=reason;$('overScore').textContent=score;$('overBest').textContent='Best solo haul: '+best;$('newBest').hidden=!isBest;
+  $('overTitle').textContent=reason;$('overScore').textContent=score;$('overBest').textContent='Best '+GH.MODES[m].n+' haul: '+Math.max(best,score);$('newBest').hidden=!isBest;
   fillLoot($('lootList'));setHud(false);
+  fillStats($('overStats'),$('overNews'),Object.assign({mode:m,score,time:Math.max(0,cur.mt),full:reason==="Time's up!",won:false},stats));
   setTimeout(()=>{if(mode==='over')show('overScreen');},600);
 }
 function fillLoot(ul){ul.innerHTML='';const ks=Object.keys(loot);
@@ -678,12 +826,21 @@ function toLobby(){
   renderLobby();
 }
 function joinMatch(m){
-  const M=GH.createMatch(m.id,m.seed,m.dur);M.cnt=m.cnt;M.fu=m.fu;M.al=m.al;
+  const M=GH.createMatch(m.id,m.seed,m.dur,{mode:m.mode,pu:!!m.pu});M.cnt=m.cnt;M.fu=m.fu;M.al=m.al;
   joinedId=m.id;mode='play';paused=false;menuOpen=false;cur={M,ents:M.ents,mt:m.mt};netPl=GH.newPlayer(net.me);
   resetBird(m.spawn[0],m.spawn[1]);resetRound();feathers=m.f;renderFeathers();if(m.ground>0)bird.groundT=m.ground;
+  syncExtras(m);
   show(null);setHud(true);boardEl.hidden=false;lastCountBeep=99;$('pauseBtn').setAttribute('aria-label','Menu');
-  showHint(controlsHint(),3.5);sfx.squawk();
+  showHint(M.gold?'Grab the Golden Chip by the fountain and hang on to it!':controlsHint(),3.5);sfx.squawk();
 }
+// power-ups taken, dazed people, this player's own power-ups and the chip, from a match message
+function syncExtras(m){const M=cur.M;
+  if(Array.isArray(m.pg)&&m.pg.length===M.pus.length)M.pg=m.pg;
+  if(Array.isArray(m.dz)&&m.dz.length===M.dz.length)M.dz=m.dz;
+  if(m.fx&&typeof m.fx==='object')for(const k in netPl.fx)if(typeof m.fx[k]==='number')netPl.fx[k]=m.fx[k];
+  netPl.shield=m.sh?1:0;setGold(m.g);}
+function setGold(g){const G=cur.M.gold;if(!G||!Array.isArray(g))return;G.by=g[0]||null;if(typeof g[1]==='number'){G.x=g[1];G.y=g[2];}}
+const goldMine=()=>mode==='play'&&!!cur.M.gold&&cur.M.gold.by===net.me;
 // rows: [[id,nick,col,score]] from the server
 function showResults(rows){
   mode='results';sfx.end();setHud(false);
@@ -697,6 +854,8 @@ function showResults(rows){
     li.append(pos,d,nm,sc);ol.appendChild(li);});
   $('resTitle').textContent=rows.length>1&&rows[0][0]===me?'You win!':rows.length>1?(rows[0][1]+' wins'):'Results';
   fillLoot($('resLoot'));
+  const mine=rows.find(r=>r[0]===me);
+  fillStats($('resStats'),$('resNews'),Object.assign({mode:cur.M.mode,score:mine?mine[3]:0,time:Math.max(0,cur.mt),full:true,won:rows.length>1&&rows[0][0]===me&&rows[0][3]>0},stats));
   setTimeout(()=>{if(mode==='results')show('resultsScreen');},600);
 }
 
@@ -744,12 +903,19 @@ function onNet(m){
     case 'match':
       // a new match has a new clock: take the server's word until a ping measures the lag
       net.clk=null;setClock(m.mt,0,true);net.lastPing=0;
-      if(mode==='play'&&joinedId===m.id){cur.M.cnt=m.cnt;cur.M.fu=m.fu;cur.M.al=m.al;feathers=m.f;renderFeathers();} // back after a reconnect
+      if(mode==='play'&&joinedId===m.id){cur.M.cnt=m.cnt;cur.M.fu=m.fu;cur.M.al=m.al;feathers=m.f;renderFeathers();syncExtras(m);} // back after a reconnect
       else if(mode==='lobby'||mode==='results')joinMatch(m);
       break;
     case 's':
       if(mode!=='play'||m.id!==joinedId)break;
-      net.snap=m;if(m.sc&&typeof m.sc==='object')cur.M.sc=m.sc;if(!net.clk)setClock(m.mt,0,true);addSnap(m);break;
+      net.snap=m;if(m.sc&&typeof m.sc==='object')cur.M.sc=m.sc;if(!net.clk)setClock(m.mt,0,true);addSnap(m);if(m.g)setGold(m.g);break;
+    case 'pu': // a power-up was taken (by: who), or our pickup was refused (no: why)
+      if(mode!=='play'||!cur.M.pus[m.k])break;
+      if(m.no){puHide.set(m.k,now()+400);break;}
+      if(typeof m.x==='number'&&typeof m.mt==='number'){const mine=m.by===net.me;GH.applyPickup(cur.M,mine?netPl:null,m.k,m.x,m.y,m.mt);puHide.delete(m.k);onPickup(cur.M.pus[m.k],mine,m.x,m.y);}
+      break;
+    case 'gold':
+      if(mode==='play'&&cur.M.gold)onGold(m);break;
     case 'ev':
       if(mode==='play'&&cur.M.ents[m.i]){const M=cur.M,e=M.ents[m.i];M.cnt[m.i]=m.cnt;M.fu[m.i]=m.fu;M.al[m.i]=m.al;
         if(m.by!==net.me&&e.angryT<=0){e.angryT=1.8;if(m.k==='steal')burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a'],8,60);}}
@@ -798,11 +964,15 @@ function renderLobby(){
   $('roomName').textContent=net.conn?(net.room==='public'?'Public room':'Private room “'+net.room+'”'):'Connecting…';
   const sb=$('startBtn'),ls=$('lobbyStatus');
   if(!l||!net.conn){sb.disabled=true;ls.textContent='Reconnecting…';return;}
+  // the room's mode: the leader (anyone, in the public room) picks it between matches
+  const o=l.opts&&GH.MODES[l.opts.mode]?l.opts:{mode:'classic',pu:true},canPick=(l.pub||l.leader===me)&&!l.match;
+  renderModes($('mpModes'),o.mode,Object.keys(GH.MODES).filter(k=>GH.MODES[k].mp),canPick,k=>netSend({t:'opts',mode:k,pu:o.pu}));
+  const pb=$('mpPu');renderPu(pb,o.pu,canPick);pb.onclick=()=>netSend({t:'opts',mode:o.mode,pu:!o.pu});
   const ST={menu:'On the menu',lobby:'Ready',play:'In a match',results:'Viewing results'};
   l.members.forEach(x=>{const li=document.createElement('li');const isMe=x.id===me;
     const d=document.createElement('canvas');d.width=d.height=60;paintIcon(d,isMe?look:GH.cleanLook(x.look),isMe?col:COLS.includes(x.col)?x.col:null,'full',0);const nm=document.createElement('span');nm.className='nm';nm.textContent=(isMe?nick:GH.cleanNick(x.nick))+(isMe?' (you)':'')+(x.id===l.leader&&!l.pub?' ★':'');
     const st=document.createElement('span');st.className='st';st.textContent=ST[x.st]||'';li.append(d,nm,st);ul.appendChild(li);});
-  if(l.match){sb.disabled=false;sb.textContent='Join match';const s=l.match.left;ls.textContent=`A match is on (${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left). Jump in!`;}
+  if(l.match){sb.disabled=false;sb.textContent='Join match';const s=l.match.left,mn=(GH.MODES[l.match.mode]||GH.MODES.classic).n;ls.textContent=`A ${mn} match is on (${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left). Jump in!`;}
   else if(!l.pub&&l.leader!==me){sb.disabled=true;sb.textContent='Start match';const ld=l.members.find(x=>x.id===l.leader);ls.textContent='Waiting for '+(ld?GH.cleanNick(ld.nick):'the leader')+' to start.';}
   else{sb.disabled=false;sb.textContent='Start match';ls.textContent=l.pub?'Anyone here can start. Everyone in the lobby flies together.':'You lead this room. Start when your flock is here.';}
 }
@@ -824,7 +994,7 @@ function gulls(){const g=[];if(mode==='solo'||mode==='play')g.push({x:bird.x,y:b
 
 function swat(src){
   feathers=Math.max(0,feathers-1);renderFeathers();sfx.swat();
-  bird.stunT=0.9;bird.inv=GH.INV_TIME;bird.swoopT=-1;bird.cd=0.4;shakeT=0.35;
+  bird.stunT=0.9;bird.inv=GH.INV_TIME;bird.swoopT=-1;bird.cd=0.4;shake(0.35);hitStop=0.09;stats.swats++;
   bird.vx=-bird.vx*0.6+(bird.x-src.x)*3;bird.vy=-bird.vy*0.6+(bird.y-src.y)*3;
   combo=0;comboT=0;comboEl.hidden=true;
   addFloat(bird.x,bird.y-34,'THWACK!','#e8483b',26);burst(bird.x,bird.y,['#fff'],10,90,true);
@@ -835,18 +1005,30 @@ function shoo(src){
   bird.vx=-bird.vx*0.5+(bird.x-src.x)*2.5;bird.vy=-bird.vy*0.5+(bird.y-src.y)*2.5;
   addFloat(bird.x,bird.y-34,'SHOO!','#fffaf0',20);src.angryT=1.2;
 }
+// a shield feather took the swat: bounced off, feathers and combo kept
+function block(src){
+  bird.stunT=0.35;bird.inv=GH.INV_TIME;bird.swoopT=-1;bird.cd=0.3;sfx.block();shake(0.18);hitStop=0.06;stats.blocks++;
+  bird.vx=-bird.vx*0.5+(bird.x-src.x)*2.5;bird.vy=-bird.vy*0.5+(bird.y-src.y)*2.5;
+  addFloat(bird.x,bird.y-34,'BLOCKED!','#46a36b',24);burst(bird.x,bird.y-20,['#46a36b','#fffaf0'],12,90,true);
+  src.angryT=1.4;
+}
 function grounded(sec){bird.groundT=sec;showHint('Grounded! Back in the air in '+Math.ceil(sec)+' seconds',3);}
 function stealFx(e,r){
   combo=r.combo;comboT=GH.COMBO_TIME;
   const key=e.kind==='cart'?'cart':r.type;loot[key]=(loot[key]||0)+1;
   bird.carry=r.type;bird.carryT=1.1;
   addFloat(e.x,e.y-24,'+'+r.pts,combo>1?'#ffd23f':'#fffaf0',combo>1?24:20);
-  if(combo>1){comboEl.hidden=false;comboEl.textContent='x'+combo;addFloat(e.x,e.y-48,'COMBO x'+combo,'#ff9f1c',15);}
+  if(combo>1){comboEl.hidden=false;comboEl.textContent='x'+combo;addFloat(e.x,e.y-48,'COMBO x'+combo,'#ff9f1c',15);announce(COMBO_WORDS[combo],combo>=5?'#ff8fb1':'#ffd23f');}
   if(e.grump)addFloat(e.x,e.y+26,'grump tax ×2','#ff8fb1',13);
-  burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a','#ff8fb1'],12,70);
-  sfx.steal(combo);e.angryT=1.8;
+  if(GH.fxOn(mp?netPl:soloPl,'dbl',cur.mt))addFloat(e.x+30,e.y-8,'×2','#ffd23f',16);
+  if(r.bonus){addFloat(bird.x,bird.y-60,'+'+r.bonus+'s','#8fd3e8',20);sfx.tick();}
+  burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a','#ff8fb1'],12+combo*3,70+combo*8);
+  sfx.steal(combo);e.angryT=1.8;shake(e.kind==='cart'?0.22:0.08+combo*0.02);hitStop=e.kind==='cart'?0.08:0.035;
+  stats.steals++;if(e.kind==='cart')stats.carts++;if(e.grump)stats.grumps++;stats.combo=Math.max(stats.combo,combo);
 }
-function unsteal(r,e){const key=e.kind==='cart'?'cart':r.type;if(loot[key]){loot[key]--;if(!loot[key])delete loot[key];}bird.carry=null;}
+const COMBO_WORDS=['','','Nice!','Sweet!','Gulltastic!','UNSTOPPABLE!'];
+function unsteal(r,e){const key=e.kind==='cart'?'cart':r.type;if(loot[key]){loot[key]--;if(!loot[key])delete loot[key];}bird.carry=null;
+  stats.steals=Math.max(0,stats.steals-1);if(e.kind==='cart')stats.carts=Math.max(0,stats.carts-1);if(e.grump)stats.grumps=Math.max(0,stats.grumps-1);}
 function tryGrab(i){
   bird.grabbed=true;
   const M=cur.M,t=cur.mt,e=M.ents[i];
@@ -854,18 +1036,20 @@ function tryGrab(i){
     const r=GH.attemptSteal(M,soloPl,i,bird.x,bird.y,t,gulls());
     if(r.k==='steal')stealFx(e,r);
     else if(r.k==='shoo')shoo(e.kind==='cart'?{x:e.x,y:e.y+20}:e);
+    else if(r.k==='block')block(e.kind==='cart'?{x:e.x,y:e.y+20}:e);
     else if(r.k==='swat'){swat(e.kind==='cart'?{x:e.x,y:e.y+20}:e);feathers=r.feathers;renderFeathers();if(feathers<=0)setTimeout(()=>endSolo('Grounded!'),700);}
     return;
   }
   // multiplayer: predict now, the server has the final say
   const r=GH.judgeSteal(M,netPl,i,bird.x,bird.y,t,gulls());
-  if(r.k!=='steal'&&r.k!=='swat'&&r.k!=='shoo')return;
+  if(r.k!=='steal'&&r.k!=='swat'&&r.k!=='shoo'&&r.k!=='block')return;
   const seq=++mySeq;
   netSend({t:'steal',seq,i,x:Math.round(bird.x*10)/10,y:Math.round(bird.y*10)/10,mt:Math.round(t*1000)/1000});
   pending.set(seq,{i,pred:r,t:now()});
   const src=e.kind==='cart'?{x:e.x,y:e.y+20}:e;
   if(r.k==='steal'){stealFx(e,r);hideFood.set(i,now()+1500);}
   else if(r.k==='shoo')shoo(src);
+  else if(r.k==='block')block(src);
   else swat(src);
 }
 function onRes(m){
@@ -877,10 +1061,65 @@ function onRes(m){
   if(m.k==='steal'){netPl.comboN=m.combo;netPl.comboUntil=t+GH.COMBO_TIME;cur.M.sc[net.me]=(cur.M.sc[net.me]||0)+(m.pts|0);
     if(p&&p.pred.k!=='steal'){const e=cur.M.ents[p.i];stealFx(e,{type:m.type,combo:m.combo,pts:m.pts});}}
   else if(p&&p.pred.k==='steal'){const e=cur.M.ents[p.i];unsteal(p.pred,e);hideFood.delete(p.i);
-    if(m.k==='swat')swat(e);else if(m.k==='shoo')shoo(e);else{addFloat(bird.x,bird.y-40,'Beaten to it!','#e8483b',16);sfx.miss();}}
+    if(m.k==='swat')swat(e);else if(m.k==='shoo')shoo(e);else if(m.k==='block')block(e);else{addFloat(bird.x,bird.y-40,'Beaten to it!','#e8483b',16);sfx.miss();}}
+  else if(p&&p.pred.k==='block'&&m.k==='swat')swat(cur.M.ents[p.i]); // the shield was already gone
   if(m.k==='swat'){netPl.invUntil=t+GH.INV_TIME;netPl.comboN=0;netPl.comboUntil=0;}
+  if(m.k==='block'){netPl.shield=0;netPl.invUntil=t+GH.INV_TIME;}
   if(m.ground>0&&bird.groundT<=0)grounded(m.ground);
 }
+// ================= power-ups and the Golden Chip =================
+const PU_COL={wind:'#8fd3e8',cloak:'#b7a3c9',beak:'#ff9f1c',shield:'#46a36b',dbl:'#ffd23f',screech:'#e8483b'};
+const PU_TXT={wind:'Tailwind!',cloak:'Camouflage!',beak:'Big beak!',shield:'Shield feather!',dbl:'Double loot!',screech:'SCREEEECH!'};
+function puUp(k){const M=cur.M,s=M.pus[k];return !!s&&!M.pg[k]&&cur.mt>=s.t0&&cur.mt<=s.t1&&!(puHide.get(k)>now());}
+// fly through a power-up to take it: solo decides here, multiplayer asks the server
+function checkPickups(){
+  const M=cur.M;if(!M.pus.length||cur.mt<0||bird.groundT>0)return;
+  for(let k=0;k<M.pus.length&&M.pus[k].t0<=cur.mt;k++){
+    const s=M.pus[k];if(!puUp(k)||Math.hypot(s.x-bird.x,s.y-bird.y)>GH.PU_R)continue;
+    if(!mp){const r=GH.attemptPickup(M,soloPl,k,bird.x,bird.y,cur.mt);if(r.k==='pu')onPickup(s,true,bird.x,bird.y);}
+    else{netSend({t:'pick',k});puHide.set(k,now()+1500);burst(s.x,s.y-20,[PU_COL[s.type],'#fffaf0'],6,50);}
+  }
+}
+function onPickup(s,mine,x,y){
+  if(s.type==='screech'){rings.push({x,y,t:0});sfx.screech();shake(0.2);}
+  if(!mine){burst(s.x,s.y-20,[PU_COL[s.type],'#fffaf0'],8,60);return;}
+  stats.pus++;if(s.type!=='screech')sfx.pu();hitStop=Math.max(hitStop,0.04);
+  announce(PU_TXT[s.type],PU_COL[s.type]);burst(s.x,s.y-20,[PU_COL[s.type],'#fffaf0','#ffd23f'],16,90);
+  addFloat(s.x,s.y-44,GH.PU[s.type].n,PU_COL[s.type],16);fxKey='';
+}
+// multiplayer: go for the chip when it's loose under us, or swoop onto whoever carries it
+function goldCheck(){
+  const G=cur.M.gold;if(!G||!mp||mode!=='play'||cur.mt<0||bird.groundT>0||now()-goldSentAt<300)return;
+  let near=false;
+  if(!G.by)near=Math.hypot(G.x-bird.x,G.y-bird.y)<GH.GOLD_R;
+  else if(G.by!==net.me){const r=remote.get(G.by);near=!!r&&bird.swoopT>=0&&bird.alt<0.6&&Math.hypot(r.x-bird.x,r.y-bird.y)<GH.GOLD_MUG+6;}
+  if(near){goldSentAt=now();netSend({t:'gold'});}
+}
+function onGold(m){const G=cur.M.gold,me=net.me;
+  if(m.k==='drop'){const was=G.by;G.by=null;if(typeof m.x==='number'){G.x=m.x;G.y=m.y;}
+    burst(G.x,G.y-10,['#ffd23f','#fff6dc'],12,80);if(was===me){announce('Chip dropped!','#e8483b');sfx.lose();}return;}
+  if(m.k!=='pick'&&m.k!=='mug')return;
+  G.by=m.by;const at=m.by===me?bird:remote.get(m.by)||G;burst(at.x,at.y-20,['#ffd23f','#fff6dc','#ff9f1c'],16,100);
+  if(m.by===me){announce(m.k==='mug'?'SNATCHED IT!':'GOLDEN CHIP!','#ffd23f');sfx.gold();shake(0.15);}
+  else if(m.from===me){announce('Chip stolen!','#e8483b');sfx.lose();shake(0.2);}
+  else sfx.tick();
+}
+// where the chip is: loose on the ground, or carried by a gull ({x,y,alt})
+function goldAt(){const G=cur.M.gold;if(!G)return null;
+  if(!G.by)return{x:G.x,y:G.y,alt:0};if(G.by===net.me&&mode==='play')return bird;const r=remote.get(G.by);return r||{x:G.x,y:G.y,alt:1};}
+// the HUD's power-up timers, redrawn only when what they say changes
+let fxKey='',fxT=0;
+function renderFx(){const el=$('fxbar'),pl=mode==='play'?netPl:mode==='solo'?soloPl:null,items=[];
+  if(pl){for(const k of ['wind','cloak','beak','dbl']){const left=pl.fx[k]-cur.mt;if(left>0)items.push([k,GH.PU[k].n,Math.ceil(left)+'s',left/GH.PU[k].dur]);}
+    if(pl.shield)items.push(['shield',GH.PU.shield.n,'',1]);}
+  if(goldMine())items.push(['gold','Golden Chip','+'+GH.GOLD_PTS+'/s',1]);
+  const key=items.map(q=>q[0]+q[2]).join();
+  if(key!==fxKey){fxKey=key;el.innerHTML='';
+    for(const [k,n,txt] of items){const d=document.createElement('div');d.className='fx';const dot=document.createElement('span');dot.className='dot';dot.style.background=PU_COL[k]||'#ffd23f';
+      const t=document.createElement('span');t.textContent=n+(txt?' '+txt:'');d.append(dot,t,document.createElement('i'));d.dataset.k=k;el.appendChild(d);}}
+  el.querySelectorAll('.fx').forEach((d,j)=>{const it=items[j];if(it)d.lastChild.style.width=Math.round(it[3]*100)+'%';});
+}
+
 function resolvePending(){
   const t=now();
   for(const [k,v] of pending)if(t-v.t>4000){pending.delete(k);if(v.pred.k==='steal')unsteal(v.pred,cur.M.ents[v.i]);}
@@ -914,9 +1153,11 @@ function updateBird(dt,g){
   }else if(b.stunT>0){b.stunT-=dt;b.spin+=dt*14;b.vx*=Math.pow(0.2,dt);b.vy*=Math.pow(0.2,dt);}
   else{
     b.spin=0;
+    // a tailwind speeds the gull up; carrying the Golden Chip slows it down
+    const fast=live?GH.speedMult(mp?netPl:soloPl,cur.mt)*(goldMine()?GH.GOLD_SLOW:1):1;
     const m=Math.hypot(ix,iy);let tvx,tvy;
-    if(m>0.12){const sp=120+180*Math.min(1,m);tvx=ix/m*sp;tvy=iy/m*sp;}
-    else{const sp=Math.hypot(b.vx,b.vy)||1;tvx=b.vx/sp*105;tvy=b.vy/sp*105;}
+    if(m>0.12){const sp=(120+180*Math.min(1,m))*fast;tvx=ix/m*sp;tvy=iy/m*sp;}
+    else{const sp=Math.hypot(b.vx,b.vy)||1;tvx=b.vx/sp*105*fast;tvy=b.vy/sp*105*fast;}
     if(b.swoopT>=0){tvx*=1.3;tvy*=1.3;}
     const k=Math.min(1,dt*3.2);b.vx+=(tvx-b.vx)*k;b.vy+=(tvy-b.vy)*k;
   }
@@ -931,7 +1172,7 @@ function updateBird(dt,g){
     if(t<0.2)b.alt=1-t/0.2;
     else if(t<0.4){b.alt=0;
       // swept check over the whole time on the ground: take the closest food the gull passes
-      if(!b.grabbed&&live&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x,b.y,b.px,b.py,g);
+      if(!b.grabbed&&live&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x,b.y,b.px,b.py,g,GH.reach(mp?netPl:soloPl,cur.mt));
         const ok=c&&!(hideFood.get(c.i)>now());
         if(ok&&(!b.cand||c.d<=b.cand.d))b.cand=c;
         else if(b.cand){const i=b.cand.i;b.cand=null;tryGrab(i);}}}
@@ -940,12 +1181,15 @@ function updateBird(dt,g){
   }else if(b.stunT<=0&&b.groundT<=0)b.alt+=(1-b.alt)*Math.min(1,dt*4);
   if(b.cd>0)b.cd-=dt;if(b.inv>0)b.inv-=dt;if(b.carryT>0){b.carryT-=dt;if(b.carryT<=0)b.carry=null;}
   // what a swoop from here would hit, for the target marker
-  aim=-1;aimK='';if(live&&b.swoopT<0&&b.stunT<=0&&b.groundT<=0&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x+b.vx*0.3,b.y+b.vy*0.3,b.x,b.y,g,6);if(c&&hasFood(c.i))aim=c.i;}
-  // and how it would go: judged where the swoop passes closest to the food
   const pl=mp?netPl:soloPl;
+  aim=-1;aimK='';if(live&&b.swoopT<0&&b.stunT<=0&&b.groundT<=0&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x+b.vx*0.3,b.y+b.vy*0.3,b.x,b.y,g,6+GH.reach(pl,cur.mt));if(c&&hasFood(c.i))aim=c.i;}
+  // and how it would go: judged where the swoop passes closest to the food
   if(aim>=0&&pl){const e=cur.M.ents[aim],fp=GH.foodPos(e,e,e.rf),vx=b.vx*0.3,vy=b.vy*0.3,l=vx*vx+vy*vy;
     const u=l?Math.max(0,Math.min(1,((fp.x-b.x)*vx+(fp.y-b.y)*vy)/l)):0;
     aimK=GH.judgeSteal(cur.M,pl,aim,b.x+vx*u,b.y+vy*u,cur.mt,g,{slack:6}).k;}
+  if(live&&!paused&&!menuOpen){checkPickups();goldCheck();}
+  // a tailwind leaves streaks
+  if(live&&GH.fxOn(pl,'wind',cur.mt)&&rnd()<dt*30)parts.push({x:b.x-b.vx*0.06+(rnd()-0.5)*16,y:b.y-b.alt*34-b.vy*0.06+(rnd()-0.5)*16,vx:-b.vx*0.3,vy:-b.vy*0.3,t:0,life:0.35,c:'rgba(255,255,255,.8)',r:2.5,feather:false});
 }
 // Other gulls: each snapshot row is a sample stamped with when its sender took it. They are
 // drawn a little in the past, between the two samples around that moment, so they glide at
@@ -990,6 +1234,8 @@ let boardKey='';function renderBoard(){
 // dt is capped for physics; realDt is the actual time since last frame, so the match
 // clock keeps up with the server even when frames are slow
 function update(dt,realDt){
+  // hit-stop: a few frames of near-freeze on big hits (the match clock keeps its pace online)
+  if(hitStop>0){hitStop-=dt;dt*=0.15;}
   T+=dt;
   if(mode==='play'){ // follow the server's clock, easing out small differences
     cur.mt+=realDt;const target=netMt();
@@ -1009,7 +1255,10 @@ function update(dt,realDt){
     const s=String(myScore());if(scoreEl.textContent!==s)scoreEl.textContent=s;
     if(cur.mt<0){const c=Math.ceil(-cur.mt);if(c!==lastCountBeep){lastCountBeep=c;sfx.beep(false);}}
     else if(lastCountBeep!==0&&mode==='play'){lastCountBeep=0;sfx.beep(true);}
-    if(mode==='solo'&&cur.mt>=dur)endSolo("Time's up!");
+    if(cur.mt>0&&left<=5&&left>0&&left!==lastLeftBeep){lastLeftBeep=left;sfx.tick();}
+    if(goldMine())stats.gold+=dt;
+    fxT-=dt;if(fxT<=0){fxT=0.1;renderFx();}
+    if(mode==='solo'&&cur.mt>=dur)endSolo(cur.M.mode==='rush'?'Out of time!':"Time's up!");
     // the server normally ends the match; this only covers a lost connection
     if(mode==='play'&&cur.mt>=dur+5)showResults(rankRows().map(r=>[r.id,r.nick,r.col,r.score]));
     const cdDeg=Math.round((bird.swoopT>=0?1:(bird.cd>0?bird.cd/0.2:0))*360);if(cdDeg!==lastCd){lastCd=cdDeg;swoopBtn.style.setProperty('--cd',cdDeg+'deg');}
@@ -1020,6 +1269,8 @@ function update(dt,realDt){
   const b=bird,tx=b.x+b.vx*0.35,ty=b.y+b.vy*0.35;
   camX+=(tx-camX)*Math.min(1,dt*3.5);camY+=(ty-camY)*Math.min(1,dt*3.5);
   if(shakeT>0)shakeT-=dt;
+  if(ann){ann.t+=dt;if(ann.t>1.1)ann=null;}
+  for(const r of rings)r.t+=dt;while(rings.length&&rings[0].t>0.7)rings.shift();
   for(const f of floats)f.t+=dt;while(floats.length&&floats[0].t>1.1)floats.shift();
   for(let i=parts.length-1;i>=0;i--){const q=parts[i];q.t+=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=0.93;q.vy*=0.93;if(q.t>q.life)parts.splice(i,1);}
 }
@@ -1215,10 +1466,10 @@ function drawPeople(L,Tp,R2,B){
   const E=cur.ents;
   const vis=(x,y,m)=>x>L-m&&x<R2+m&&y>Tp-m&&y<B+m;
   // awareness cones: exactly what the rules check (shared.js coneOf / faceAt)
-  const live=mode==='solo'||mode==='play';
-  E.forEach((e,i)=>{if(!hasFood(i)||!vis(e.x,e.y,170))return;
+  const live=mode==='solo'||mode==='play',dz=cur.M.dz,cloak=live&&GH.fxOn(mp?netPl:soloPl,'cloak',cur.mt);
+  E.forEach((e,i)=>{if(!hasFood(i)||!vis(e.x,e.y,170)||dz[i]>cur.mt)return; // dazed people see nothing
     const al=cur.M.al[i]>cur.mt,c=GH.coneOf(e,al),o=GH.guardPos(e,e);
-    if(c.kind==='shoo'&&!al&&!(live&&Math.hypot(o.x-bird.x,o.y-bird.y)<c.range+140))return;
+    if(c.kind==='shoo'&&(cloak||!al&&!(live&&Math.hypot(o.x-bird.x,o.y-bird.y)<c.range+140)))return;
     cone(o.x,o.y,e.rf,c.half,c.range,c.kind==='shoo'?CONE_RGB.shoo:e.kind==='cart'&&!al?CONE_RGB.cart:CONE_RGB.swat,al);
   });
   dbgMark('cones');
@@ -1235,7 +1486,9 @@ function drawPeople(L,Tp,R2,B){
   });
   dbgMark('people');
   if(aim>=0&&E[aim])drawAimFood(E[aim]);
-  E.forEach((p,i)=>{if(p.angryT>0&&vis(p.x,p.y,40))bubble(p.x,p.y-(p.kind==='cart'?6:18),p.grump?'!!#@%':'HEY!',p.grump||p.kind==='cart');});
+  E.forEach((p,i)=>{if(!vis(p.x,p.y,40))return;
+    if(dz[i]>cur.mt){const o=GH.guardPos(p,p);stars(o.x,o.y-4,1);}
+    else if(p.angryT>0)bubble(p.x,p.y-(p.kind==='cart'?6:18),p.grump?'!!#@%':'HEY!',p.grump||p.kind==='cart');});
   dbgMark('aim+bubbles');
 }
 const AIM_COL={steal:'#ffd23f',far:'#ffd23f',shoo:'#fffaf0',swat:'#e8483b'};
@@ -1284,6 +1537,79 @@ function drawTrees(L,Tp,R2,B){
     const s=treeSprite(t,S,shadow);ctx.drawImage(s.c,s.x-Lpx,s.y-Tpx);}
   ctx.setTransform(S,0,0,S,-Lpx,-Tpx);
 }
+// three little stars circling a dazed head (or a stunned gull)
+function stars(x,y,sc){ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=1;
+  for(let k=0;k<3;k++){const a=T*6+k*TAU/3;const sx=x+Math.cos(a)*14*sc,sy=y+Math.sin(a)*7*sc-10*sc;
+    ctx.beginPath();for(let q=0;q<10;q++){const qa=q*TAU/10-Math.PI/2,rad=q%2?1.4:3.4;ctx.lineTo(sx+Math.cos(qa)*rad,sy+Math.sin(qa)*rad);}ctx.closePath();ctx.fill();ctx.stroke();}}
+// a power-up's symbol, in ink, about 16 units across
+function puIcon(type){
+  ctx.strokeStyle=INK;ctx.fillStyle=INK;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';
+  switch(type){
+    case 'wind':for(let k=-1;k<=1;k++){ctx.beginPath();ctx.moveTo(-7,k*4.5);ctx.lineTo(3-Math.abs(k)*2,k*4.5);ctx.arc(3-Math.abs(k)*2,k*4.5-2,2,Math.PI/2,-Math.PI*0.9,true);ctx.stroke();}break;
+    case 'cloak':ctx.beginPath();ctx.moveTo(-8,0);ctx.quadraticCurveTo(0,-8,8,0);ctx.quadraticCurveTo(0,8,-8,0);ctx.stroke();
+      ctx.beginPath();ctx.arc(0,0,2.4,0,TAU);ctx.fill();ctx.beginPath();ctx.moveTo(-7,7);ctx.lineTo(7,-7);ctx.stroke();break;
+    case 'beak':ctx.fillStyle='#fffaf0';ctx.beginPath();ctx.moveTo(-6,-6);ctx.lineTo(8,-1);ctx.lineTo(-6,1);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-6,2);ctx.lineTo(6,4);ctx.lineTo(-6,7);ctx.closePath();ctx.fill();ctx.stroke();break;
+    case 'shield':ctx.fillStyle='#fffaf0';ctx.beginPath();ctx.moveTo(6,-8);ctx.quadraticCurveTo(-7,-4,-6,8);ctx.quadraticCurveTo(6,3,6,-8);ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-5,7);ctx.lineTo(4,-5);ctx.lineWidth=1.3;ctx.stroke();break;
+    case 'dbl':ctx.font='12px "Titan One",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('x2',0,1);ctx.textBaseline='alphabetic';break;
+    case 'screech':ctx.fillRect(-1.3,-7,2.6,8);ctx.beginPath();ctx.arc(0,5,1.6,0,TAU);ctx.fill();
+      for(const sd of [-1,1]){ctx.beginPath();ctx.arc(0,0,8,sd>0?-0.6:Math.PI-0.6,sd>0?0.6:Math.PI+0.6);ctx.lineWidth=1.6;ctx.stroke();}break;
+  }
+  ctx.lineCap='butt';
+}
+// power-ups hover over the street, pop in, and blink out in their last seconds
+function drawPowerups(L,Tp,R2,B){
+  const M=cur.M;
+  for(let k=0;k<M.pus.length&&M.pus[k].t0<=cur.mt;k++){
+    const s=M.pus[k];if(!puUp(k)||s.x<L-40||s.x>R2+40||s.y<Tp-60||s.y>B+40)continue;
+    const left=s.t1-cur.mt;if(left<3&&Math.floor(left*6)%2)continue;
+    const pop=Math.min(1,(cur.mt-s.t0)/0.3),y=s.y-20+Math.sin(T*3+k)*3;
+    ctx.fillStyle='rgba(20,22,30,.25)';ctx.beginPath();ctx.ellipse(s.x,s.y+2,11*pop,4.5*pop,0,0,TAU);ctx.fill();
+    ctx.save();ctx.translate(s.x,y);ctx.scale(pop,pop);
+    ctx.setLineDash([5,5]);ctx.lineDashOffset=-T*12;ctx.strokeStyle='rgba(255,250,240,.85)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,19,0,TAU);ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0;
+    ctx.fillStyle=PU_COL[s.type];ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(0,0,13,0,TAU);ctx.fill();ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,.55)';ctx.beginPath();ctx.ellipse(-4.5,-6,4,2.2,-0.5,0,TAU);ctx.fill();
+    puIcon(s.type);ctx.restore();
+  }
+}
+// the Golden Chip: one big golden fry
+function chip(x,y,sc,rot){
+  ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.scale(sc,sc);
+  ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=2;rr(-3.5,-12,7,24,2.5);ctx.fill();ctx.stroke();
+  ctx.fillStyle='#fff6dc';ctx.fillRect(-1.8,-9.5,1.6,15);ctx.fillStyle='#e0a400';ctx.fillRect(1.4,-9,1.2,17);
+  ctx.restore();
+  const a=(Math.sin(T*5)+1)/2;ctx.save();ctx.translate(x+7*sc,y-9*sc);ctx.rotate(T*2);ctx.fillStyle='#fffaf0';ctx.beginPath();
+  for(let k=0;k<8;k++){const q=k*TAU/8,rad=(k%2?1:3+a*2)*sc*0.8;ctx.lineTo(Math.cos(q)*rad,Math.sin(q)*rad);}ctx.closePath();ctx.fill();ctx.restore();
+}
+function drawGold(L,Tp,R2,B){
+  const G=cur.M.gold;if(!G||G.by)return;
+  if(G.x<L-60||G.x>R2+60||G.y<Tp-80||G.y>B+60)return;
+  const glow=0.5+Math.sin(T*4)*0.2;
+  ctx.fillStyle=`rgba(255,210,63,${glow*0.35})`;ctx.beginPath();ctx.arc(G.x,G.y,34,0,TAU);ctx.fill();
+  ctx.strokeStyle='rgba(255,210,63,.9)';ctx.lineWidth=2.5;ctx.setLineDash([7,6]);ctx.lineDashOffset=-T*18;ctx.beginPath();ctx.arc(G.x,G.y,GH.GOLD_R+4,0,TAU);ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0;
+  ctx.fillStyle='rgba(20,22,30,.3)';ctx.beginPath();ctx.ellipse(G.x,G.y+4,10,4,0,0,TAU);ctx.fill();
+  chip(G.x,G.y-12+Math.sin(T*3)*3,1.3,Math.sin(T*1.7)*0.4);
+}
+// screen space: an arrow at the edge of the view pointing at the chip when it's out of sight
+function goldArrow(){
+  const at=goldAt();if(!at||goldMine())return;
+  const sx=(at.x-camL)*Z,sy=(at.y-(at.alt||0)*34-camT)*Z,m=34;
+  if(sx>m&&sx<VW-m&&sy>m+60&&sy<VH-m)return;
+  const cx=VW/2,cy=VH/2,dx=sx-cx,dy=sy-cy,k=Math.min((VW/2-m)/Math.abs(dx||1e-6),(VH/2-m)/Math.abs(dy||1e-6)),x=cx+dx*k,y=cy+dy*k,a=Math.atan2(dy,dx);
+  ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=3;ctx.lineJoin='round';
+  ctx.beginPath();ctx.moveTo(22,0);ctx.lineTo(6,-11);ctx.lineTo(6,11);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.beginPath();ctx.arc(0,0,14,0,TAU);ctx.fill();ctx.stroke();ctx.restore();
+  chip(x,y+2,0.7,0.5);
+}
+// screen space: big announcer text that pops, then fades
+function drawAnnounce(){
+  if(!ann)return;const t=ann.t,pop=t<0.12?0.5+t/0.12*0.6:t<0.22?1.1-(t-0.12):1,a=t<0.8?1:Math.max(0,1-(t-0.8)/0.3);
+  ctx.globalAlpha=a;ctx.font=`${Math.round(Math.min(VW,VH)*0.085*pop)}px "Titan One",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.lineWidth=8;ctx.strokeStyle=INK;ctx.lineJoin='round';const y=VH*0.3-t*12;
+  ctx.save();ctx.translate(VW/2,y);ctx.rotate(-0.05);ctx.strokeText(ann.txt,0,0);ctx.fillStyle=ann.col;ctx.fillText(ann.txt,0,0);ctx.restore();
+  ctx.textBaseline='alphabetic';ctx.globalAlpha=1;
+}
 function nameTag(x,y,txt,col){
   ctx.font='900 12px Nunito,system-ui,sans-serif';ctx.textAlign='center';const w=ctx.measureText(txt).width+22;
   ctx.fillStyle='rgba(29,35,48,.82)';rr(x-w/2,y-9,w,18,9);ctx.fill();
@@ -1320,17 +1646,21 @@ function drawGull(o,lk,collar,label){
     ctx.save();ctx.translate(o.x,o.y-lift);ctx.rotate(o.h+(o.spin||0));ctx.scale(sc,sc);
     for(let part=1;part<=3;part++){if(part===2&&!collar)continue;const e=gullLayer(lk,collar,o.flap,o.alt<0.6,part,S);ctx.drawImage(e.c,e.x,e.y,e.w,e.h);}
     ctx.restore();
-    if(o.stun){ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=1;for(let k=0;k<3;k++){const a=T*6+k*TAU/3;const sx=o.x+Math.cos(a)*14*sc,sy=o.y-lift+Math.sin(a)*7*sc-10*sc;
-      ctx.beginPath();for(let q=0;q<10;q++){const qa=q*TAU/10-Math.PI/2,rad=q%2?1.4:3.4;ctx.lineTo(sx+Math.cos(qa)*rad,sy+Math.sin(qa)*rad);}ctx.closePath();ctx.fill();ctx.stroke();}}
+    if(o.stun)stars(o.x,o.y-lift,sc);
   }
   if(o.carry){const fx=o.x+Math.cos(o.h)*24*sc,fy=o.y-lift+Math.sin(o.h)*24*sc;drawFood(o.carry,fx,fy,0.95);}
+  if(o.shield){const p=0.5+Math.sin(T*5)*0.15;ctx.strokeStyle=`rgba(70,163,107,${p+0.3})`;ctx.lineWidth=3;ctx.beginPath();ctx.arc(o.x,o.y-lift,26*sc,0,TAU);ctx.stroke();
+    ctx.strokeStyle=`rgba(255,250,240,${p})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(o.x,o.y-lift,26*sc,T*2,T*2+1.2);ctx.stroke();}
+  if(o.gold)chip(o.x-Math.cos(o.h)*4,o.y-lift-22*sc,0.8,Math.sin(T*3)*0.3);
   if(label)nameTag(o.x,o.y-lift-32*sc,label,collar||'#fffaf0');
 }
 function drawFx(){
   for(const q of parts){const a=1-q.t/q.life;ctx.globalAlpha=Math.max(0,a);ctx.fillStyle=q.c;
     if(q.feather){ctx.save();ctx.translate(q.x,q.y);ctx.rotate(q.t*6);ctx.beginPath();ctx.ellipse(0,0,5,2,0,0,TAU);ctx.fill();ctx.strokeStyle='#1d2330';ctx.lineWidth=1;ctx.stroke();ctx.restore();}
     else ctx.fillRect(q.x-q.r/2,q.y-q.r/2,q.r,q.r);}
-  ctx.globalAlpha=1;ctx.textAlign='center';
+  ctx.globalAlpha=1;
+  for(const r of rings){const u=r.t/0.7;ctx.strokeStyle=`rgba(232,72,59,${1-u})`;ctx.lineWidth=6*(1-u)+1;ctx.beginPath();ctx.arc(r.x,r.y,GH.SCREECH_R*(0.2+u*0.8),0,TAU);ctx.stroke();}
+  ctx.textAlign='center';
   for(const f of floats){const a=f.t<0.8?1:1-(f.t-0.8)/0.3;ctx.globalAlpha=Math.max(0,a);const y=f.y-f.t*38;const pop=f.t<0.12?0.6+f.t/0.12*0.4:1;
     ctx.font=`${Math.round(f.size*pop)}px "Titan One",sans-serif`;ctx.lineWidth=5;ctx.strokeStyle='#1d2330';ctx.lineJoin='round';ctx.strokeText(f.txt,f.x,y);ctx.fillStyle=f.col;ctx.fillText(f.txt,f.x,y);}
   ctx.globalAlpha=1;
@@ -1357,10 +1687,16 @@ function drawMini(){
   cur.ents.forEach((e,i)=>{if(!hasFood(i))return;const x=e.x*s,y=e.y*s;mctx.strokeStyle=INK;
     if(e.kind==='cart'){mctx.fillStyle='#ffd23f';mctx.lineWidth=2;mctx.beginPath();mctx.roundRect?mctx.roundRect(x-5*k,y-5*k,10*k,10*k,2*k):mctx.rect(x-5*k,y-5*k,10*k,10*k);mctx.fill();mctx.stroke();}
     else{mctx.fillStyle=e.grump?'#e8483b':'#ff9f1c';mctx.lineWidth=1.5;mctx.beginPath();mctx.arc(x,y,2.6*k,0,TAU);mctx.fill();mctx.stroke();}});
+  const M=cur.M;
+  for(let q=0;q<M.pus.length&&M.pus[q].t0<=cur.mt;q++){if(!puUp(q))continue;const p=M.pus[q],x=p.x*s,y=p.y*s;
+    mctx.fillStyle=PU_COL[p.type];mctx.strokeStyle=INK;mctx.lineWidth=1.5;mctx.beginPath();mctx.moveTo(x,y-5*k);mctx.lineTo(x+5*k,y);mctx.lineTo(x,y+5*k);mctx.lineTo(x-5*k,y);mctx.closePath();mctx.fill();mctx.stroke();}
   const vw=VW/Z,vh=VH/Z,vx=camL*s,vy=camT*s;
   mctx.lineWidth=4;mctx.strokeStyle='rgba(29,35,48,.45)';mctx.strokeRect(vx,vy,vw*s,vh*s);mctx.lineWidth=2;mctx.strokeStyle='rgba(255,250,240,.9)';mctx.strokeRect(vx,vy,vw*s,vh*s);
   for(const r of remote.values()){mctx.save();mctx.translate(r.x*s,r.y*s);mctx.rotate(r.h);mctx.fillStyle=r.col;mctx.strokeStyle=INK;mctx.lineWidth=2;
     mctx.beginPath();mctx.arc(0,0,4.2*k,0,TAU);mctx.fill();mctx.stroke();mctx.beginPath();mctx.moveTo(4.2*k,-2*k);mctx.lineTo(7*k,0);mctx.lineTo(4.2*k,2*k);mctx.fillStyle=INK;mctx.fill();mctx.restore();}
+  const ga=goldAt();
+  if(ga){const x=ga.x*s,y=ga.y*s,r=(7+Math.sin(T*6))*k;mctx.fillStyle='#ffd23f';mctx.strokeStyle=INK;mctx.lineWidth=2;mctx.beginPath();
+    for(let q=0;q<10;q++){const a=q*TAU/10-Math.PI/2,rad=q%2?r*0.45:r;mctx.lineTo(x+Math.cos(a)*rad,y+Math.sin(a)*rad);}mctx.closePath();mctx.fill();mctx.stroke();}
   // you: a pulse ring, then a big arrow with a white halo
   const px=bird.x*s,py=bird.y*s,pu=(T*1.2)%1;
   mctx.strokeStyle=`rgba(255,250,240,${0.8*(1-pu)})`;mctx.lineWidth=2;mctx.beginPath();mctx.arc(px,py,(6+pu*14)*k,0,TAU);mctx.stroke();
@@ -1383,8 +1719,13 @@ function render(){
   if(live)drawLanding();
   dbgMark('landing');
   drawTrees(L,Tp,L+vw,Tp+vh);dbgMark('trees');
-  for(const r of remote.values())drawGull({x:r.x,y:r.y,h:r.h,alt:r.alt,flap:r.flap,stun:r.s},r.look,r.col,r.nick);
-  drawGull({x:bird.x,y:bird.y,h:bird.h,alt:bird.alt,flap:bird.flap,spin:bird.spin,stun:bird.stunT>0,inv:bird.inv,carry:bird.carry},look,col,null);
+  if(live){drawPowerups(L,Tp,L+vw,Tp+vh);drawGold(L,Tp,L+vw,Tp+vh);}
+  const gBy=cur.M.gold&&cur.M.gold.by,me=mp?netPl:soloPl;
+  for(const [id,r] of remote)drawGull({x:r.x,y:r.y,h:r.h,alt:r.alt,flap:r.flap,stun:r.s,gold:gBy===id},r.look,r.col,r.nick);
+  const cloaked=live&&GH.fxOn(me,'cloak',cur.mt);if(cloaked)ctx.globalAlpha=0.45+Math.sin(T*4)*0.08;
+  drawGull({x:bird.x,y:bird.y,h:bird.h,alt:bird.alt,flap:bird.flap,spin:bird.spin,stun:bird.stunT>0,inv:bird.inv,carry:bird.carry,
+    shield:live&&me&&me.shield,gold:live&&gBy&&gBy===net.me&&mode==='play'},look,col,null);
+  ctx.globalAlpha=1;
   dbgMark('gulls');
   drawFx();dbgMark('fx');
   ctx.setTransform(DPR,0,0,DPR,0,0);
@@ -1399,6 +1740,7 @@ function render(){
     ctx.font=`${Math.round(Math.min(VW,VH)*0.22)}px "Titan One",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.lineWidth=10;ctx.strokeStyle=INK;ctx.lineJoin='round';ctx.strokeText(txt,VW/2,VH*0.42);ctx.fillStyle='#ff9f1c';ctx.fillText(txt,VW/2,VH*0.42);ctx.textBaseline='alphabetic';
   }
+  if(live){if(mode==='play')goldArrow();drawAnnounce();}
   dbgMark('joystick+countdown');
   if(live&&(T>=miniT||T<miniT-1)){miniT=T+0.05;drawMini();} // 20 Hz is plenty for the minimap
   dbgMark('minimap');
