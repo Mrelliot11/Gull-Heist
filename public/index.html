@@ -280,12 +280,20 @@ const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
 const BITMAPS=(()=>{try{return new URLSearchParams(location.search).has('bitmaps')&&typeof OffscreenCanvas!=='undefined';}catch(e){return false;}})();
 function spriteCanvas(w,h){if(BITMAPS)return new OffscreenCanvas(w,h);const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
 const bake=c=>BITMAPS?c.transferToImageBitmap():c;
+// Hand a dropped cache image's pixels back now rather than at the next garbage collection:
+// browsers budget GPU memory for canvases, and stale ones can push new ones off the fast path.
+function freeImg(c){if(!c)return;if(c.close)c.close();else{c.width=0;c.height=0;}}
+const freeC=v=>freeImg(v.c);
+function dropCache(map,free){for(const v of map.values())free(v);map.clear();}
+function evictOldest(map,free){const k=map.keys().next().value;free(map.get(k));map.delete(k);}
 let DPR=1,baseDPR=1,VW=0,VH=0,Z=1;
 // Resolution steps, as a share of baseDPR. Adaptive scaling (see trackRes) moves between them;
 // the last good step is remembered for next time.
 const RES_LEVELS=[1,0.8,0.65,0.5];
-const res={i:Math.min(RES_LEVELS.length-1,Math.max(0,(()=>{try{return +localStorage.getItem('gullheist.res')||0;}catch(e){return 0;}})()|0)),
-  win:[],winAt:0,good:0,pending:null,upAt:-1e9,noDownUntil:0,noUpUntil:0};
+// ?res=0..3 pins a step and turns adaptive scaling off, for testing
+const RES_PIN=(()=>{try{const v=new URLSearchParams(location.search).get('res');return v!=null&&/^[0-3]$/.test(v)?+v:null;}catch(e){return null;}})();
+const res={i:RES_PIN!=null?RES_PIN:Math.min(RES_LEVELS.length-1,Math.max(0,(()=>{try{return +localStorage.getItem('gullheist.res')||0;}catch(e){return 0;}})()|0)),
+  win:[],winAt:0,good:0,pending:null,upAt:-1e9,noDownUntil:0,noUpUntil:0,upBackoff:60000};
 // battery saver: 30 fps and never above the 65% resolution step
 const SAVER_LEVEL=2;
 let saver=(()=>{try{return localStorage.getItem('gullheist.saver')==='1';}catch(e){return false;}})();
@@ -723,6 +731,7 @@ function onNet(m){
       net.me=m.you;net.room=m.room;net.pub=!!m.pub;net.create=false;net.conn=true;net.fails=0;net.full=false;net.clk=null;net.sentSt=null;net.sentProf='';
       tokStore.set({room:m.room,tok:m.tok});
       try{const u=new URL(location.href),q=new URLSearchParams();if(m.room!=='public')q.set('room',m.room);if(DEBUG)q.set('debug','1');
+        if(BITMAPS)q.set('bitmaps','1');if(RES_PIN!=null)q.set('res',String(RES_PIN));
         u.search=q.toString();history.replaceState(null,'',u.toString());}catch(e){}
       $('roomCode').value=m.room==='public'?'':m.room;
       updateMpBtn();break;
@@ -1084,11 +1093,11 @@ function groundTile(i,j,S){
   ctx=main;t={c:bake(c),x:x0,y:y0};tiles.set(k,t);return t;
 }
 function drawGroundCached(S,Lpx,Tpx,L,Tp,R2,B){
-  if(S!==tileS){tiles.clear();tileS=S;}
+  if(S!==tileS){dropCache(tiles,freeC);tileS=S;}
   const i0=Math.floor(L/TILE),i1=Math.floor(R2/TILE),j0=Math.floor(Tp/TILE),j1=Math.floor(B/TILE);
   ctx.setTransform(1,0,0,1,0,0);
   for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const t=groundTile(i,j,S);ctx.drawImage(t.c,t.x-Lpx,t.y-Tpx);}
-  for(const keep=(i1-i0+1)*(j1-j0+1)+8;tiles.size>keep;)tiles.delete(tiles.keys().next().value);
+  for(const keep=(i1-i0+1)*(j1-j0+1)+8;tiles.size>keep;)evictOldest(tiles,freeC);
   ctx.setTransform(S,0,0,S,-Lpx,-Tpx);
   // the fountain's ripples are the one moving part
   if(FX+42>L&&FX-42<R2&&FY+42>Tp&&FY-42<B){ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;const rp=(T*18)%20;
@@ -1110,7 +1119,7 @@ function cone(x,y,a,half,r,rgb,alert){
 const WALK_FRAMES=12,PR=18,personSprites=new Map();let spriteS=0;
 function drawPersonBody(p,x,y,sitting,holding){
   ctx.fillStyle='rgba(20,22,30,.22)';ctx.beginPath();ctx.ellipse(x+2.5,y+3.5,9,11,p.face,0,TAU);ctx.fill();
-  const S=DPR*Z;if(S!==spriteS){personSprites.clear();spriteS=S;}
+  const S=DPR*Z;if(S!==spriteS){dropCache(personSprites,freeImg);spriteS=S;}
   const f=sitting?0:((Math.round(p.walk/TAU*WALK_FRAMES)%WALK_FRAMES)+WALK_FRAMES)%WALK_FRAMES;
   if(!p.lookKey||p.lookPants!==p.pants){p.lookPants=p.pants;p.lookKey=[p.shirt,p.skin,p.hair,p.pants||PANTS[0],p.grump?1:0].join('|');}
   const k=p.lookKey+'|'+(sitting?'s':f)+(holding?'h':'');
@@ -1119,7 +1128,7 @@ function drawPersonBody(p,x,y,sitting,holding){
   else{const n=Math.ceil(2*PR*S);c=spriteCanvas(n,n);
     const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,PR*S,PR*S);
     personShape(p,sitting?0:Math.sin(f/WALK_FRAMES*TAU)*2.4,sitting,holding);ctx=main;c=bake(c);
-    personSprites.set(k,c);if(personSprites.size>600)personSprites.delete(personSprites.keys().next().value);}
+    personSprites.set(k,c);if(personSprites.size>600)evictOldest(personSprites,freeImg);}
   const d=c.width/S;
   ctx.save();ctx.translate(x,y);ctx.rotate(p.face);ctx.drawImage(c,-PR,-PR,d,d);ctx.restore();
 }
@@ -1160,7 +1169,7 @@ function bubble(x,y,t,hot){ctx.font='14px "Titan One",sans-serif';const w=ctx.me
 // the food and its shadow come from a sprite per type, stamped on whole device pixels
 const foodSprites=new Map();let foodS=0;
 function heldFood(type,x,y,s,rich){
-  const S=DPR*Z,m=13*s,k=type+'|'+s;if(S!==foodS){foodSprites.clear();foodS=S;}
+  const S=DPR*Z,m=13*s,k=type+'|'+s;if(S!==foodS){dropCache(foodSprites,freeImg);foodS=S;}
   let c=foodSprites.get(k);
   if(!c){const n=Math.ceil(2*m*S);c=spriteCanvas(n,n);
     const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,m*S,m*S);
@@ -1174,9 +1183,9 @@ function heldFood(type,x,y,s,rich){
 // carts stand still, so each is drawn once per stocked / sold-out state into a sprite at its own
 // sub-pixel offset and stamped on whole device pixels. Cleared on a scale change or font load.
 const cartSprites=new Map();let cartS=0;
-if(document.fonts)document.fonts.addEventListener('loadingdone',()=>cartSprites.clear());
+if(document.fonts)document.fonts.addEventListener('loadingdone',()=>dropCache(cartSprites,freeC));
 function drawCart(c,i){
-  const S=DPR*Z,has=hasFood(i),k=[c.x,c.y,c.col,c.cfood,has].join();if(S!==cartS||cartSprites.size>40){cartSprites.clear();cartS=S;}
+  const S=DPR*Z,has=hasFood(i),k=[c.x,c.y,c.col,c.cfood,has].join();if(S!==cartS||cartSprites.size>40){dropCache(cartSprites,freeC);cartS=S;}
   let e=cartSprites.get(k);
   if(!e){const x0=Math.floor((c.x-24)*S),y0=Math.floor((c.y-19)*S),cv2=spriteCanvas(Math.ceil((c.x+28)*S)-x0,Math.ceil((c.y+23)*S)-y0);
     const main=ctx;ctx=cv2.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);cartShape(c,has);ctx=main;
@@ -1266,7 +1275,7 @@ function treeSprite(t,S,shadow){
   ctx=main;return e[k]={c:bake(c),x:x0,y:y0};
 }
 function drawTrees(L,Tp,R2,B){
-  const S=DPR*Z,Lpx=Math.round(L*S),Tpx=Math.round(Tp*S);if(S!==treeS){treeSprites.clear();treeS=S;}
+  const S=DPR*Z,Lpx=Math.round(L*S),Tpx=Math.round(Tp*S);if(S!==treeS){dropCache(treeSprites,e=>{if(e.s)freeImg(e.s.c);if(e.c)freeImg(e.c.c);});treeS=S;}
   ctx.setTransform(1,0,0,1,0,0);
   for(const shadow of [true,false])for(const t of trees){if(t.x<L-40||t.x>R2+40||t.y<Tp-40||t.y>B+40)continue;
     const s=treeSprite(t,S,shadow);ctx.drawImage(s.c,s.x-Lpx,s.y-Tpx);}
@@ -1293,7 +1302,7 @@ function gullLayer(lk,collar,flap,folded,part,S){
   const b=GULL_BOX[part-1],cw=Math.ceil((b[2]-b[0])*S),ch=Math.ceil((b[3]-b[1])*S),c=spriteCanvas(cw,ch);
   const g=c.getContext('2d');g.setTransform(S,0,0,S,-b[0]*S,-b[1]*S);gullSprite(g,lk,collar,f,folded,part);
   e={c:bake(c),x:b[0],y:b[1],w:cw/S,h:ch/S};gullSprites.set(k,e);
-  if(gullSprites.size>300)gullSprites.delete(gullSprites.keys().next().value);
+  if(gullSprites.size>300)evictOldest(gullSprites,freeC);
   return e;
 }
 // one gull, local or remote. o: {x,y,h,alt,flap,spin?,stun?,inv?,carry?}
@@ -1304,7 +1313,7 @@ function drawGull(o,lk,collar,label){
   const shSpan=(o.alt<0.6?15:22+Math.sin(o.flap)*6)*ss;ctx.beginPath();ctx.moveTo(4*ss,0);ctx.quadraticCurveTo(3*ss,shSpan*0.8,-4*ss,shSpan);ctx.lineTo(-9*ss,shSpan*0.85);ctx.lineTo(-6*ss,0);
   ctx.lineTo(-9*ss,-shSpan*0.85);ctx.lineTo(-4*ss,-shSpan);ctx.quadraticCurveTo(3*ss,-shSpan*0.8,4*ss,0);ctx.fill();ctx.restore();
   if(!(o.inv>0&&Math.floor(o.inv*12)%2===0)){
-    const S=DPR*Z*1.3;if(S!==gullS){gullSprites.clear();gullS=S;}
+    const S=DPR*Z*1.3;if(S!==gullS){dropCache(gullSprites,freeC);gullS=S;}
     ctx.save();ctx.translate(o.x,o.y-lift);ctx.rotate(o.h+(o.spin||0));ctx.scale(sc,sc);
     for(let part=1;part<=3;part++){if(part===2&&!collar)continue;const e=gullLayer(lk,collar,o.flap,o.alt<0.6,part,S);ctx.drawImage(e.c,e.x,e.y,e.w,e.h);}
     ctx.restore();
@@ -1412,14 +1421,14 @@ function drawPreviews(){
 // Most of a frame's cost is the browser filling the canvas, which JS timers never see, so this
 // watches the time between frames instead. A second of gameplay under ~45 fps steps the
 // resolution down; the step is kept only if it made frames faster (a phone capped at 30 fps in
-// battery saver gains nothing from blur). Five fast seconds in a row step back up, and a step up
-// that turns out too slow is not retried for a minute.
+// battery saver gains nothing from blur). Ten fast seconds in a row step back up; a step up that
+// turns out too slow is not retried for a minute, then two, four and so on up to ten.
 // the second after a change is skipped: it pays for redrawing the cached ground and sprites
 function setRes(i){res.i=i;res.settle=1;applyRes();try{localStorage.setItem('gullheist.res',String(i));}catch(e){}}
 // iv: the frame interval being aimed for; "slow" and "fast" are judged against it
 // frame rate is given up before resolution: this only acts once the frame rate is at its floor
 function trackRes(ms,iv){
-  if(!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250||!fpsAtFloor()){res.win.length=0;res.winAt=0;return;}
+  if(RES_PIN!=null||!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250||!fpsAtFloor()){res.win.length=0;res.winAt=0;return;}
   const t=now();if(!res.winAt)res.winAt=t;
   res.win.push(ms);if(t-res.winAt<1000||res.win.length<10)return;
   const w=res.win.sort((a,b)=>a-b),med=w[w.length>>1];res.win.length=0;res.winAt=t;
@@ -1429,9 +1438,11 @@ function trackRes(ms,iv){
   const lv=resLevel();
   if(med>iv*1.32){res.good=0;
     if(lv<RES_LEVELS.length-1&&t>=res.noDownUntil){
-      if(t-res.upAt<5000)res.noUpUntil=t+60000;
+      // a step up that turned slow: wait longer each time before trying again, since every
+      // change rebuilds the cached ground and sprites
+      if(t-res.upAt<5000){res.noUpUntil=t+res.upBackoff;res.upBackoff=Math.min(res.upBackoff*2,600000);}
       dbgLog(`down to ${RES_LEVELS[lv+1]*100}%: ${Math.round(med)} ms`);res.pending={from:res.i,before:med};setRes(lv+1);}}
-  else if(med<iv*1.08){if(++res.good>=5&&lv>(saver?SAVER_LEVEL:0)&&t>=res.noUpUntil){dbgLog(`up to ${RES_LEVELS[lv-1]*100}%`);res.good=0;res.upAt=t;setRes(lv-1);}}
+  else if(med<iv*1.08){if(++res.good>=10&&lv>(saver?SAVER_LEVEL:0)&&t>=res.noUpUntil){dbgLog(`up to ${RES_LEVELS[lv-1]*100}%`);res.good=0;res.upAt=t;setRes(lv-1);}}
   else res.good=0;
 }
 
@@ -1467,11 +1478,17 @@ function dbgRaf(ts){
     `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms · mean ${dbgMean(dbg.work).toFixed(1)} ms per drawn frame`,
     `parts    ${Object.entries(dbg.sec).map(([k,a])=>[k,dbgMean(a)]).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v.toFixed(1)}`).join(' · ')}`,
     `sprites  ${BITMAPS?'ImageBitmap (?bitmaps)':'canvas'}`,
-    `res      ${RES_LEVELS[resLevel()]*100}% · ${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
+    `cache    ${cacheSize()}`,
+    `res      ${RES_LEVELS[resLevel()]*100}%${RES_PIN!=null?' (pinned by ?res)':''} ·${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
     `adaptive ${res.pending?'judging a step down':'steady'}${t<res.noDownUntil?` · no step down for ${Math.ceil((res.noDownUntil-t)/1000)}s`:''}${t<res.noUpUntil?` · no step up for ${Math.ceil((res.noUpUntil-t)/1000)}s`:''}`,
     `gpu      ${dbg.gpu}`,`browser  ${ua}`,
     ...dbg.log.map(s=>'log      '+s)].join('\n');
 }
+function cacheSize(){let px=0,n=0;const add=c=>{if(c){px+=c.width*c.height;n++;}};
+  for(const t of tiles.values())add(t.c);for(const c of personSprites.values())add(c);for(const c of foodSprites.values())add(c);
+  for(const e of cartSprites.values())add(e.c);for(const e of treeSprites.values()){if(e.s)add(e.s.c);if(e.c)add(e.c.c);}
+  for(const e of gullSprites.values())add(e.c);
+  return `${n} images · ${(px*4/1048576).toFixed(1)} MB · ${tiles.size} ground tiles`;}
 function dbgFrame(ts,work){if(dbg.lastDrawn)dbgPush(dbg.drawn,ts-dbg.lastDrawn);dbg.lastDrawn=ts;dbgPush(dbg.work,work);}
 
 // ================= frame rate =================
