@@ -284,6 +284,7 @@ let cur=null;
 let mode='title';      // title | solo | lobby | play | over | results
 let mp=false;          // in the multiplayer flow
 let paused=false;
+let menuOpen=false;    // the pause/menu overlay is up: locks this player's own controls in every mode
 const bird={x:1300,y:1300,px:1300,py:1300,vx:90,vy:0,h:0,alt:1,flap:0,swoopT:-1,cd:0,stunT:0,inv:0,grabbed:false,cand:null,carry:null,carryT:0,spin:0,groundT:0};
 let feathers=3,combo=0,comboT=0,loot={},best=+store.get('gullheist.best',0)||0;
 let camX=1300,camY=1300,camL=0,camT=0,shakeT=0,T=0,last=now();
@@ -320,7 +321,7 @@ const keys={};
 const fine=matchMedia('(hover:hover) and (pointer:fine)').matches;
 let ctrl=store.get('gullheist.controls','mouse')==='keys'?'keys':'mouse';
 const kbd=()=>fine&&ctrl==='keys';
-const playing=()=>(mode==='solo'||mode==='play')&&!paused;
+const playing=()=>(mode==='solo'||mode==='play')&&!paused&&!menuOpen;
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('pointerdown',e=>{
   if(!playing())return;
@@ -387,7 +388,7 @@ function openMenu(v){
     $('pauseText').textContent=mode==='solo'?'The fries will wait. Probably.':'The match keeps going while this is open.';
     $('quitBtn').textContent=mode==='solo'?'Quit':'Leave match';$('pauseScreen').hidden=false;}
   else $('pauseScreen').hidden=true;
-  paused=v&&mode==='solo';if(!v)last=now();
+  paused=v&&mode==='solo';menuOpen=v;if(!v)last=now();
 }
 let hintTimer=0;
 function showHint(txt,dur){hintEl.textContent=txt;hintEl.hidden=false;hintEl.style.opacity=1;hintTimer=dur||2.5;}
@@ -418,9 +419,9 @@ $('startBtn').addEventListener('click',()=>{ensureAudio();const l=net.lobby;
 function resetBird(x,y){Object.assign(bird,{x,y,px:x,py:y,vx:100,vy:0,alt:1,swoopT:-1,cd:0,stunT:0,inv:0,cand:null,carry:null,carryT:0,spin:0,groundT:0});camX=x;camY=y;}
 function resetRound(){feathers=3;combo=0;comboT=0;loot={};floats.length=0;parts.length=0;pending.clear();hideFood.clear();
   renderFeathers();scoreEl.textContent='0';comboEl.hidden=true;timerPill.classList.remove('low');}
-function toTitle(){mp=false;mode='title';paused=false;setHud(false);setAttract();show('titleScreen');joinedId=null;updateMpBtn();}
+function toTitle(){mp=false;mode='title';paused=false;menuOpen=false;setHud(false);setAttract();show('titleScreen');joinedId=null;updateMpBtn();}
 function startSolo(){
-  ensureAudio();mp=false;mode='solo';paused=false;
+  ensureAudio();mp=false;mode='solo';paused=false;menuOpen=false;
   const M=GH.createMatch('solo',(rnd()*2**31)|0,GH.DUR);cur={M,ents:M.ents,mt:0};soloPl=GH.newPlayer('me');
   resetBird(1300,1300);resetRound();show(null);setHud(true);boardEl.hidden=true;$('pauseBtn').setAttribute('aria-label','Pause');
   showHint(controlsHint(),3.5);sfx.squawk();
@@ -438,12 +439,12 @@ function fillLoot(ul){ul.innerHTML='';const ks=Object.keys(loot);
   ks.sort((a,b)=>loot[b]-loot[a]).forEach(k=>{const li=document.createElement('li');li.textContent=(k==='cart'?'Cart raids':FOODS[k].n)+' × '+loot[k];ul.appendChild(li);});}
 function toLobby(){
   if(!net.conn){toTitle();return;}
-  mp=true;mode='lobby';paused=false;setHud(false);joinedId=null;show('lobbyScreen');setAttract();
+  mp=true;mode='lobby';paused=false;menuOpen=false;setHud(false);joinedId=null;show('lobbyScreen');setAttract();
   renderLobby();
 }
 function joinMatch(m){
   const M=GH.createMatch(m.id,m.seed,m.dur);M.cnt=m.cnt;M.fu=m.fu;M.al=m.al;
-  joinedId=m.id;mode='play';paused=false;cur={M,ents:M.ents,mt:m.mt};netPl=GH.newPlayer(net.me);
+  joinedId=m.id;mode='play';paused=false;menuOpen=false;cur={M,ents:M.ents,mt:m.mt};netPl=GH.newPlayer(net.me);
   resetBird(m.spawn[0],m.spawn[1]);resetRound();feathers=m.f;renderFeathers();if(m.ground>0)bird.groundT=m.ground;
   show(null);setHud(true);boardEl.hidden=false;lastCountBeep=99;$('pauseBtn').setAttribute('aria-label','Menu');
   showHint(controlsHint(),3.5);sfx.squawk();
@@ -489,6 +490,7 @@ function netRetry(){setTimeout(()=>{if(!net.conn)netConnect();},Math.min(8000,40
 function switchRoom(name,create){
   if(net.ws){const old=net.ws;net.ws=null;try{old.close();}catch(e){}}
   net.room=name||net.room;net.create=create;net.conn=false;net.lobby=null;net.dead=false;net.fails=0;
+  for(const id in names)delete names[id]; // leaving this room's roster behind
   $('lobbyStatus').textContent='Switching room…';renderLobby();netConnect();
 }
 function onNet(m){
@@ -644,8 +646,8 @@ function resolvePending(){
   for(const [i,u] of hideFood)if(u<t)hideFood.delete(i);
 }
 
-function updateWorld(dt){
-  const t=cur.mt,M=cur.M,g=gulls();
+function updateWorld(dt,g){
+  const t=cur.mt,M=cur.M;
   cur.ents.forEach((e,i)=>{
     const b=GH.bodyAt(e,t);
     if(e.kind==='walk'){const moved=Math.hypot(b.x-e.x,b.y-e.y);e.x=b.x;e.y=b.y;if(moved<60)e.walk+=moved*0.22;}
@@ -655,9 +657,9 @@ function updateWorld(dt){
     if(e.angryT>0)e.angryT-=dt;
   });
 }
-function updateBird(dt){
+function updateBird(dt,g){
   let ix=0,iy=0;const b=bird;const live=(mode==='solo'||mode==='play');
-  if(live&&!paused){
+  if(live&&!paused&&!menuOpen){
     ix=joy.vx;iy=joy.vy;
     if(joy.id===null&&mouse.on&&fine&&!kbd()){const sx=(b.x-camL)*Z,sy=(b.y-b.alt*34-camT)*Z;const dx=mouse.x-sx,dy=mouse.y-sy,d=Math.hypot(dx,dy);
       if(d>26){const m=Math.min(1,d/160);ix=dx/d*m;iy=dy/d*m;}}
@@ -687,7 +689,7 @@ function updateBird(dt){
     if(t<0.2)b.alt=1-t/0.2;
     else if(t<0.4){b.alt=0;
       // swept check over the whole time on the ground: take the closest food the gull passes
-      if(!b.grabbed&&live&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x,b.y,b.px,b.py,gulls());
+      if(!b.grabbed&&live&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x,b.y,b.px,b.py,g);
         const ok=c&&!(hideFood.get(c.i)>now());
         if(ok&&(!b.cand||c.d<=b.cand.d))b.cand=c;
         else if(b.cand){const i=b.cand.i;b.cand=null;tryGrab(i);}}}
@@ -696,7 +698,7 @@ function updateBird(dt){
   }else if(b.stunT<=0&&b.groundT<=0)b.alt+=(1-b.alt)*Math.min(1,dt*4);
   if(b.cd>0)b.cd-=dt;if(b.inv>0)b.inv-=dt;if(b.carryT>0){b.carryT-=dt;if(b.carryT<=0)b.carry=null;}
   // what a swoop from here would hit, for the target marker
-  aim=-1;if(live&&b.swoopT<0&&b.stunT<=0&&b.groundT<=0&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x+b.vx*0.3,b.y+b.vy*0.3,b.x,b.y,gulls(),6);if(c&&hasFood(c.i))aim=c.i;}
+  aim=-1;if(live&&b.swoopT<0&&b.stunT<=0&&b.groundT<=0&&cur.mt>=0){const c=GH.findTarget(cur.M,cur.mt,b.x+b.vx*0.3,b.y+b.vy*0.3,b.x,b.y,g,6);if(c&&hasFood(c.i))aim=c.i;}
 }
 function updateRemote(dt){
   if(mode!=='play'||!net.snap){remote.clear();return;}
@@ -726,8 +728,9 @@ function update(dt){
     resolvePending();
   }else cur.mt+=dt;
   if(mode==='solo')GH.tickPlayer(soloPl,cur.mt);
-  updateWorld(dt);
-  updateBird(dt);
+  const g=gulls();
+  updateWorld(dt,g);
+  updateBird(dt,g);
   updateRemote(dt);
   const live=mode==='solo'||mode==='play';
   if(live){

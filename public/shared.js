@@ -178,7 +178,7 @@ function attemptSteal(M,pl,i,x,y,t,gulls,o){
   if(r.k==='steal'){M.cnt[i]++;M.fu[i]=Math.round((t+restockFor(M.seed,i,M.ents[i],M.cnt[i]))*10)/10;M.al[i]=t+ALERT_STEAL;
     pl.comboN=r.combo;pl.comboUntil=t+COMBO_TIME;M.sc[pl.id]=(M.sc[pl.id]||0)+r.pts;}
   else{M.al[i]=Math.max(M.al[i],t+ALERT_TRY);
-    if(r.k==='swat'){pl.feathers--;pl.invUntil=t+INV_TIME;pl.comboN=0;pl.comboUntil=0;
+    if(r.k==='swat'){pl.feathers=Math.max(0,pl.feathers-1);pl.invUntil=t+INV_TIME;pl.comboN=0;pl.comboUntil=0;
       if(pl.feathers<=0){pl.groundUntil=t+GROUND_TIME;}}}
   r.feathers=pl.feathers;r.ground=pl.groundUntil>t?pl.groundUntil-t:0;r.cnt=M.cnt[i];r.fu=M.fu[i];r.al=M.al[i];
   return r;

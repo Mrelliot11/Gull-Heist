@@ -58,9 +58,11 @@ const CSP = [
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data:",
   "connect-src 'self' __WS__",
+  "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
+  "upgrade-insecure-requests",
 ].join('; ');
 
 const server = http.createServer((req, res) => {
@@ -76,6 +78,8 @@ const server = http.createServer((req, res) => {
 
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400, securityHeaders).end(); return; }
+  // a NUL byte makes fs.stat/path.join throw synchronously, which would otherwise crash the process
+  if (rel.indexOf('\0') !== -1) { res.writeHead(400, securityHeaders).end(); return; }
   if (rel === '/' || rel === '/index.html') {
     // older Safari doesn't treat ws:/wss: as 'self', so name the socket origin too
     const host = /^[a-z0-9.:[\]-]+$/i.test(req.headers.host || '') ? req.headers.host : '';
@@ -119,6 +123,8 @@ function originAllowed(req) {
 }
 const connsPerIp = new Map();
 const recentPerIp = new Map(); // ip -> connection attempts this minute
+const roomsCreatedPerIp = new Map(); // ip -> new (never-before-seen) rooms this minute
+const MAX_ROOMS_CREATED_PER_IP = 20;
 
 // ---------- rooms ----------
 // room: { name, pub, players: Map(id -> player), match, nextSlot, lastEnd }
@@ -152,10 +158,10 @@ function broadcast(room, msg, filter, droppable) {
   for (const p of room.players.values()) if (!filter || filter(p)) send(p, data, droppable);
 }
 function lobbyMsg(room) {
-  const m = room.match;
+  const m = room.match, conn = connected(room);
   return {
-    t: 'lobby', room: room.name, pub: room.pub, leader: leaderOf(room),
-    members: connected(room).map(p => ({ id: p.id, nick: p.nick, col: p.col, st: p.st })),
+    t: 'lobby', room: room.name, pub: room.pub, leader: conn.length ? conn[0].id : null,
+    members: conn.map(p => ({ id: p.id, nick: p.nick, col: p.col, st: p.st })),
     match: m ? { id: m.M.id, left: Math.max(0, Math.round(m.M.dur - roomMt(m))) } : null,
   };
 }
@@ -251,12 +257,15 @@ function handle(room, p, m) {
       const match = room.match;
       if (!match || p.plMatch !== match.M.id || p.x == null) { reply({ k: 'bad' }); return true; }
       const M = match.M, mt = roomMt(match), pl = p.pl;
-      if (mt - pl.lastTry < GH.STEAL_CD) { reply({ k: 'bad' }); return true; }
+      // measured against the server's own clock, never the client-supplied mt below, so a
+      // client can't shrink the cooldown by backdating the judged time of its steal attempts
+      if (mt - p.lastStealAt < GH.STEAL_CD) { reply({ k: 'bad' }); return true; }
       // the claimed spot must be close to where the server last saw this gull
       if (Math.hypot(m.x - p.x, m.y - p.y) > 60) { reply({ k: 'far' }); return true; }
       // judge at the moment the client saw it, allowing for up to half a second of lag
       const tc = Math.max(mt - 0.5, Math.min(mt, m.mt));
       const r = GH.attemptSteal(M, pl, m.i, m.x, m.y, tc, gullsIn(room), { margin: 0.12, slack: 14 });
+      if (r.k !== 'bad' && r.k !== 'far' && r.k !== 'gone') p.lastStealAt = mt;
       reply({ k: r.k, pts: r.pts, combo: r.combo, type: r.type, f: pl.feathers, ground: Math.max(0, pl.groundUntil - mt) });
       if (r.k === 'steal' || r.k === 'swat' || r.k === 'shoo') {
         broadcast(room, { t: 'ev', k: r.k, i: m.i, by: p.id, cnt: M.cnt[m.i], fu: M.fu[m.i], al: M.al[m.i] });
@@ -278,8 +287,8 @@ function attach(ws, req, ip, roomName, create) {
     const t = Date.now();
     tokens = Math.min(60, tokens + (t - last) * 0.05); // 50 msgs/s sustained
     last = t;
-    if (tokens < 1 || isBinary) { if (++dropped > 200) ws.close(4008, 'rate limit'); return; }
-    tokens -= 1;
+    tokens -= 1; // charge binary frames too, so they can't dodge the limiter below
+    if (tokens < 0 || isBinary) { if (++dropped > 200) ws.close(4008, 'rate limit'); return; }
     let m;
     try { m = JSON.parse(buf); } catch { m = null; }
     if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.t !== 'string') { if (++dropped > 200) ws.close(4008, 'bad messages'); return; }
@@ -287,7 +296,7 @@ function attach(ws, req, ip, roomName, create) {
     if (!p) {
       if (m.t !== 'hello') return;
       clearTimeout(helloTimer);
-      ({ p, room } = join(ws, roomName, create, m) || {});
+      ({ p, room } = join(ws, roomName, create, m, ip) || {});
       return;
     }
     if (!handle(room, p, m) && ++dropped > 200) ws.close(4008, 'bad messages');
@@ -305,7 +314,7 @@ function attach(ws, req, ip, roomName, create) {
   ws.on('error', () => {});
 }
 
-function join(ws, roomName, create, hello) {
+function join(ws, roomName, create, hello, ip) {
   const nick = GH.cleanNick(hello.nick);
   const col = GH.COLS.includes(hello.col) ? hello.col : GH.COLS[0];
   // resume a recent session (e.g. after a Wi-Fi blip) so the score carries over
@@ -322,6 +331,10 @@ function join(ws, roomName, create, hello) {
   let room = rooms.get(name);
   if (!room) {
     if (rooms.size >= MAX_ROOMS) { ws.close(4002, 'server full'); return null; }
+    // one IP spamming distinct never-seen room names can't fill up every room slot
+    const made = (roomsCreatedPerIp.get(ip) || 0) + 1;
+    if (made > MAX_ROOMS_CREATED_PER_IP) { ws.close(4002, 'server full'); return null; }
+    roomsCreatedPerIp.set(ip, made);
     room = { name, pub: name === 'public', players: new Map(), match: null, nextSlot: 0 };
     rooms.set(name, room);
   }
@@ -329,6 +342,7 @@ function join(ws, roomName, create, hello) {
   const p = {
     id: crypto.randomBytes(6).toString('hex'), tok: crypto.randomBytes(16).toString('hex'),
     ws, nick, col, st: 'menu', pl: null, plMatch: null, x: null, y: null, h: 0, a: 1, posAt: 0, goneAt: 0,
+    lastStealAt: -1e9,
   };
   room.players.set(p.id, p);
   byToken.set(p.tok, { p, room });
@@ -393,7 +407,7 @@ const loop = setInterval(() => {
     broadcast(room, { t: 's', id: m.M.id, mt: Math.round(mt * 1000) / 1000, p: ps, sc }, p => p.st === 'play', true);
     if (tickN % 15 === 0) sendLobby(room);
   }
-  if (tickN % 900 === 0) recentPerIp.clear(); // once a minute
+  if (tickN % 900 === 0) { recentPerIp.clear(); roomsCreatedPerIp.clear(); } // once a minute
 }, TICK_MS);
 
 // drop connections that stopped answering (closed laptops, dead Wi-Fi)

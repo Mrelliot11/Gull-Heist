@@ -2,5 +2,6 @@
 # forwards everything (including the /ws WebSocket) to the game.
 # Run the game with TRUST_PROXY=1 so per-IP limits see real client addresses.
 yourgame.gg {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy localhost:8080
 }
