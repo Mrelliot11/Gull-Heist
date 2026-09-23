@@ -40,6 +40,41 @@ npm start
 - Steals within 3.5 seconds of each other chain a combo, up to x5.
 - A small reticle ahead of your gull shows where a swoop would come down. When food is in reach, brackets mark it: gold means a clean steal, white means you'd be seen and shooed, red (with **SWAT!**) means you'd lose a feather.
 - Food held by a grump twinkles: it's worth double.
+- Power-ups float over the streets. Fly through one to take it (see below). The first gull there gets it.
+
+## Modes
+
+Pick a solo mode on the title screen. In a room, the leader picks the mode in the lobby (anyone can in the public room).
+
+| Mode | Where | How it plays |
+|---|---|---|
+| **Classic** | solo, rooms | 90 seconds. The original rules. |
+| **Frenzy** | solo, rooms | 60 seconds. More people, everyone starts with food, food comes back twice as fast, power-ups twice as often. |
+| **Rush** | solo | 30 seconds on the clock. Each steal adds 2 seconds (4 for a cart, +1 at a x3 combo or more). |
+| **Golden Chip** | rooms | 2 minutes. A golden fry sits by the fountain. Carry it to score 5 points a second, but you fly a little slower. Swoop onto the carrier to snatch it. A swat, a grounding or leaving drops it. |
+
+The best haul is kept for each solo mode.
+
+## Power-ups
+
+Power-ups are on by default. Turn them off with **Power-ups: on/off** on the title screen (solo) or in the lobby (rooms). Timers for the ones you have show under your loot.
+
+| Power-up | What it does |
+|---|---|
+| **Tailwind** (blue) | Fly 50% faster for 6 seconds. |
+| **Camouflage** (lilac) | Regular people don't see you for 6 seconds. Grumps and vendors still do. |
+| **Big beak** (orange) | Grab food from further away for 8 seconds. |
+| **Shield feather** (green) | Blocks the next swat. You keep your feathers and your combo. |
+| **Double loot** (yellow) | Steals are worth double for 8 seconds. |
+| **Screech** (red) | People close by are dazed for a few seconds and can't see anyone. |
+
+In rooms the server decides who got a power-up and applies it, including the faster speed limit for a tailwind.
+
+## Trophies and the daily challenge
+
+Matches count toward trophies (press **Trophies** on the title screen) and a daily challenge that changes every day. Both are kept in your browser. Doing the challenge on days in a row builds a streak.
+
+Press **M** to mute. The pause menu has a sound toggle too.
 
 ## Your gull
 
@@ -100,6 +135,7 @@ DNS changes can take a few minutes to a few hours. Once the site loads over `htt
 
 - The server runs each match: it keeps the clock, decides which steals count, and keeps the scores. A modified browser can't hand itself points or take over a match. Matches keep going when someone's tab is in the background.
 - The server checks steals against where it last saw your gull and how fast gulls can fly, so teleporting doesn't work.
+- Power-up and Golden Chip grabs are judged at the server's own position for your gull, not the one the page claims.
 - Opening `public/index.html` straight from disk works for solo play only.
 
 ## Tests
