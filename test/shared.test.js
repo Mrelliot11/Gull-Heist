@@ -175,6 +175,13 @@ test('cleanNick strips control and bidi characters and trims to 14', () => {
   assert.equal(GH.cleanRoom('AbC-12!3'), 'abc-123');
 });
 
+test('cleanLook keeps in-range integers and zeroes everything else', () => {
+  assert.deepEqual(GH.cleanLook({ p: 2, h: 8, e: 4 }), { p: 2, h: 8, e: 4 });
+  assert.deepEqual(GH.cleanLook({ p: GH.LOOK_N.p, h: -1, e: 1.5 }), { p: 0, h: 0, e: 0 });
+  assert.deepEqual(GH.cleanLook({ p: '3', h: null, x: 9 }), { p: 0, h: 0, e: 0 });
+  for (const v of [null, undefined, 'p3', [1, 2, 3], 7]) assert.deepEqual(GH.cleanLook(v), { p: 0, h: 0, e: 0 });
+});
+
 test('spawnPoint gives 12 distinct points inside the city', () => {
   for (const seed of [1, SEED, 0x7fffffff]) {
     const seen = new Set();

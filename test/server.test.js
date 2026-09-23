@@ -114,6 +114,15 @@ test('two clients in a private room see each other', async () => {
   }
 });
 
+test('a gull look is checked and shown to the room', async () => {
+  const at = B.mark();
+  A.send({ t: 'prof', nick: 'Alice', col: GH.COLS[2], look: { p: 3, h: 99, e: 1 } });
+  const l = await B.wait(m => m.t === 'lobby' && m.members.some(p => p.id === A.welcome.you && p.look && p.look.p === 3), at);
+  const me = l.members.find(p => p.id === A.welcome.you);
+  assert.deepEqual(me.look, { p: 3, h: 0, e: 1 });
+  assert.equal(me.col, GH.COLS[2]);
+});
+
 test('only the leader of a private room can start', async () => {
   const at = B.mark();
   B.send({ t: 'st', st: 'lobby' });
