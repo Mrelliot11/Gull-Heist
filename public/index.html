@@ -274,9 +274,15 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 const cv=document.getElementById('game');
 let ctx=cv.getContext('2d'); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
-let DPR=1,VW=0,VH=0,Z=1;
+let DPR=1,baseDPR=1,VW=0,VH=0,Z=1;
+// Resolution steps, as a share of baseDPR. Adaptive scaling (see trackRes) moves between them;
+// the last good step is remembered for next time.
+const RES_LEVELS=[1,0.8,0.65,0.5];
+const res={i:Math.min(RES_LEVELS.length-1,Math.max(0,(()=>{try{return +localStorage.getItem('gullheist.res')||0;}catch(e){return 0;}})()|0)),
+  win:[],winAt:0,good:0,pending:null,upAt:-1e9,noDownUntil:0,noUpUntil:0};
+function applyRes(){DPR=Math.max(Math.min(baseDPR,0.6),baseDPR*RES_LEVELS[res.i]);cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
 // the canvas is rasterized in full every frame; 1.5x looks the same as 2x with this chunky art
-function resize(){DPR=Math.min(1.5,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);
+function resize(){baseDPR=Math.min(1.5,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;applyRes();
   Z=Math.max(0.8,Math.min(1.35,Math.min(VW,VH)/430));}
 addEventListener('resize',resize);resize();
 
@@ -1316,9 +1322,31 @@ function drawPreviews(){
   g.fillStyle=col;g.beginPath();g.arc(w/2-tw/2+17,ty,7,0,TAU);g.fill();g.fillStyle='#fffaf0';g.fillText(nick,w/2+9,ty+8);
 }
 
+// ================= adaptive resolution =================
+// Most of a frame's cost is the browser filling the canvas, which JS timers never see, so this
+// watches the time between frames instead. A second of gameplay under ~45 fps steps the
+// resolution down; the step is kept only if it made frames faster (a phone capped at 30 fps in
+// battery saver gains nothing from blur). Five fast seconds in a row step back up, and a step up
+// that turns out too slow is not retried for a minute.
+function setRes(i){res.i=i;applyRes();try{localStorage.setItem('gullheist.res',String(i));}catch(e){}}
+function trackRes(ms){
+  if(!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250){res.win.length=0;res.winAt=0;return;}
+  const t=now();if(!res.winAt)res.winAt=t;
+  res.win.push(ms);if(t-res.winAt<1000||res.win.length<20)return;
+  const w=res.win.sort((a,b)=>a-b),med=w[w.length>>1];res.win.length=0;res.winAt=t;
+  if(res.pending){const p=res.pending;res.pending=null;
+    if(med>p.before*0.85){setRes(p.from);res.noDownUntil=t+120000;return;}} // didn't help: undo
+  if(med>22){res.good=0;
+    if(res.i<RES_LEVELS.length-1&&t>=res.noDownUntil){
+      if(t-res.upAt<5000)res.noUpUntil=t+60000;
+      res.pending={from:res.i,before:med};setRes(res.i+1);}}
+  else if(med<18){if(++res.good>=5&&res.i>0&&t>=res.noUpUntil){res.good=0;res.upAt=t;setRes(res.i-1);}}
+  else res.good=0;
+}
+
 // ================= loop =================
 function frame(ts){
-  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.033,raw);last=ts;
+  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.033,raw);trackRes(ts-last);last=ts;
   if(!paused)update(dt,Math.min(1,raw));
   render();
   requestAnimationFrame(frame);
