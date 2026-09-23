@@ -275,9 +275,12 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 const cv=document.getElementById('game');
 let ctx=cv.getContext('2d',{alpha:false}); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
-// Cached sprites and tiles are drawn once into their own canvases. With ?bitmaps in the address
-// they are turned into ImageBitmaps once drawn, to test browsers where copying a canvas is slow.
-const BITMAPS=(()=>{try{return new URLSearchParams(location.search).has('bitmaps')&&typeof OffscreenCanvas!=='undefined';}catch(e){return false;}})();
+// Cached sprites and tiles are drawn once, then kept as ImageBitmaps where the browser can make
+// them from an OffscreenCanvas. Firefox copies one canvas into another far more slowly than it
+// draws a bitmap: the ground tiles took 10-14 ms a frame on an Adreno phone, against 0.1 ms as
+// bitmaps. ?canvas keeps plain canvases, for comparison.
+const FORCE_CANVAS=(()=>{try{return new URLSearchParams(location.search).has('canvas');}catch(e){return false;}})();
+const BITMAPS=!FORCE_CANVAS&&(()=>{try{return typeof OffscreenCanvas!=='undefined'&&'transferToImageBitmap' in OffscreenCanvas.prototype&&!!new OffscreenCanvas(1,1).getContext('2d');}catch(e){return false;}})();
 function spriteCanvas(w,h){if(BITMAPS)return new OffscreenCanvas(w,h);const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
 const bake=c=>BITMAPS?c.transferToImageBitmap():c;
 // Hand a dropped cache image's pixels back now rather than at the next garbage collection:
@@ -731,7 +734,7 @@ function onNet(m){
       net.me=m.you;net.room=m.room;net.pub=!!m.pub;net.create=false;net.conn=true;net.fails=0;net.full=false;net.clk=null;net.sentSt=null;net.sentProf='';
       tokStore.set({room:m.room,tok:m.tok});
       try{const u=new URL(location.href),q=new URLSearchParams();if(m.room!=='public')q.set('room',m.room);if(DEBUG)q.set('debug','1');
-        if(BITMAPS)q.set('bitmaps','1');if(RES_PIN!=null)q.set('res',String(RES_PIN));
+        if(FORCE_CANVAS)q.set('canvas','1');if(RES_PIN!=null)q.set('res',String(RES_PIN));
         u.search=q.toString();history.replaceState(null,'',u.toString());}catch(e){}
       $('roomCode').value=m.room==='public'?'':m.room;
       updateMpBtn();break;
@@ -1477,7 +1480,7 @@ function dbgRaf(ts){
     `mode     ${mode} · battery saver ${saver?'on':'off'}`,
     `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms · mean ${dbgMean(dbg.work).toFixed(1)} ms per drawn frame`,
     `parts    ${Object.entries(dbg.sec).map(([k,a])=>[k,dbgMean(a)]).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v.toFixed(1)}`).join(' · ')}`,
-    `sprites  ${BITMAPS?'ImageBitmap (?bitmaps)':'canvas'}`,
+    `sprites  ${BITMAPS?'ImageBitmap':'canvas'}${FORCE_CANVAS?' (?canvas)':''}`,
     `cache    ${cacheSize()}`,
     `res      ${RES_LEVELS[resLevel()]*100}%${RES_PIN!=null?' (pinned by ?res)':''} ·${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
     `adaptive ${res.pending?'judging a step down':'steady'}${t<res.noDownUntil?` · no step down for ${Math.ceil((res.noDownUntil-t)/1000)}s`:''}${t<res.noUpUntil?` · no step up for ${Math.ceil((res.noUpUntil-t)/1000)}s`:''}`,
