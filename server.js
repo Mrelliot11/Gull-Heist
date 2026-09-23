@@ -57,7 +57,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' __WS__",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
@@ -77,7 +77,10 @@ const server = http.createServer((req, res) => {
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400, securityHeaders).end(); return; }
   if (rel === '/' || rel === '/index.html') {
-    res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache', 'Content-Security-Policy': CSP, ...securityHeaders });
+    // older Safari doesn't treat ws:/wss: as 'self', so name the socket origin too
+    const host = /^[a-z0-9.:[\]-]+$/i.test(req.headers.host || '') ? req.headers.host : '';
+    const csp = CSP.replace('__WS__', host ? `ws://${host} wss://${host}` : '');
+    res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache', 'Content-Security-Policy': csp, ...securityHeaders });
     res.end(req.method === 'HEAD' ? undefined : indexHtml);
     return;
   }
