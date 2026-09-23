@@ -1077,12 +1077,27 @@ function cone(x,y,a,half,r,rgb,alert){
   ctx.strokeStyle=`rgba(${rgb},.95)`;ctx.lineWidth=2.5;ctx.stroke();
   if(alert){ctx.beginPath();ctx.arc(x,y,r+5,a-half,a+half);ctx.setLineDash([6,5]);ctx.lineDashOffset=-T*24;ctx.strokeStyle=`rgba(${rgb},.7)`;ctx.lineWidth=2;ctx.stroke();ctx.setLineDash([]);ctx.lineDashOffset=0;}
 }
-// a person seen from above, facing p.face. holding: the food hand is out.
+// A person seen from above, facing p.face. holding: the food hand is out.
+// Bodies are drawn once per look, pose and walk phase into small sprites, then stamped rotated;
+// only the shadow is drawn live, since it falls the same way however the person turns.
+const WALK_FRAMES=12,PR=18,personSprites=new Map();let spriteS=0;
 function drawPersonBody(p,x,y,sitting,holding){
-  ctx.save();ctx.translate(x,y);
-  ctx.fillStyle='rgba(20,22,30,.22)';ctx.beginPath();ctx.ellipse(2.5,3.5,9,11,p.face,0,TAU);ctx.fill();
-  ctx.rotate(p.face);
-  const sw=sitting?0:Math.sin(p.walk)*2.4;
+  ctx.fillStyle='rgba(20,22,30,.22)';ctx.beginPath();ctx.ellipse(x+2.5,y+3.5,9,11,p.face,0,TAU);ctx.fill();
+  const S=DPR*Z;if(S!==spriteS){personSprites.clear();spriteS=S;}
+  const f=sitting?0:((Math.round(p.walk/TAU*WALK_FRAMES)%WALK_FRAMES)+WALK_FRAMES)%WALK_FRAMES;
+  if(!p.lookKey||p.lookPants!==p.pants){p.lookPants=p.pants;p.lookKey=[p.shirt,p.skin,p.hair,p.pants||PANTS[0],p.grump?1:0].join('|');}
+  const k=p.lookKey+'|'+(sitting?'s':f)+(holding?'h':'');
+  let c=personSprites.get(k);
+  if(c){personSprites.delete(k);personSprites.set(k,c);}
+  else{c=document.createElement('canvas');c.width=c.height=Math.ceil(2*PR*S);
+    const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,PR*S,PR*S);
+    personShape(p,sitting?0:Math.sin(f/WALK_FRAMES*TAU)*2.4,sitting,holding);ctx=main;
+    personSprites.set(k,c);if(personSprites.size>600)personSprites.delete(personSprites.keys().next().value);}
+  const d=c.width/S;
+  ctx.save();ctx.translate(x,y);ctx.rotate(p.face);ctx.drawImage(c,-PR,-PR,d,d);ctx.restore();
+}
+// the body itself, centred on the origin and facing +x. sw: how far the arms and feet swing.
+function personShape(p,sw,sitting,holding){
   ctx.strokeStyle=INK;ctx.lineWidth=1.4;ctx.lineJoin='round';
   if(sitting){ctx.fillStyle=p.pants||PANTS[0];for(const sd of [-1,1]){rr(-1,sd*2.7-1.9,11,3.8,1.9);ctx.fill();ctx.stroke();}
     ctx.fillStyle='#2b2f3a';for(const sd of [-1,1]){ctx.beginPath();ctx.ellipse(11,sd*2.7,2.1,1.9,0,0,TAU);ctx.fill();}}
@@ -1109,7 +1124,6 @@ function drawPersonBody(p,x,y,sitting,holding){
     ctx.strokeStyle='rgba(255,255,255,.22)';ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(0,0,3.6,Math.PI*0.8,Math.PI*1.3);ctx.stroke();
     ctx.strokeStyle=INK;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(1,0,5.8,0,TAU);ctx.stroke();}
   ctx.fillStyle='rgba(29,35,48,.4)';ctx.beginPath();ctx.arc(6.6,0,1.3,0,TAU);ctx.fill();
-  ctx.restore();
 }
 function bubble(x,y,t,hot){ctx.font='14px "Titan One",sans-serif';const w=ctx.measureText(t).width+14;ctx.fillStyle=hot?'#e8483b':'#fffaf0';ctx.strokeStyle=INK;ctx.lineWidth=2;ctx.lineJoin='round';
   rr(x-w/2,y-23,w,20,8);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(x-4,y-3.8);ctx.lineTo(x,y+3);ctx.lineTo(x+4,y-3.8);ctx.fill();ctx.stroke();
@@ -1149,7 +1163,8 @@ function drawPeople(L,Tp,R2,B){
   });
   E.forEach((c,i)=>{if(c.kind!=='cart'||!vis(c.x,c.y,60))return;
     drawCart(c,i);
-    const v=GH.guardPos(c,c);drawPersonBody({face:c.face,skin:c.skin,hair:c.hair,shirt:'#fffaf0',pants:'#3b4a6b',grump:false,walk:0},v.x,v.y,false,false);
+    const v=GH.guardPos(c,c);if(!c.vendor)c.vendor={skin:c.skin,hair:c.hair,shirt:'#fffaf0',pants:'#3b4a6b',grump:false,walk:0};
+    c.vendor.face=c.face;drawPersonBody(c.vendor,v.x,v.y,false,false);
   });
   E.forEach((p,i)=>{if(p.kind==='cart'||!vis(p.x,p.y,30))return;
     const has=hasFood(i);
