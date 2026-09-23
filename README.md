@@ -38,7 +38,12 @@ npm start
 - Grumps (red cone, double value) and cart vendors (yellow cone, 50 points) swat you. Three swats and you're grounded for 6 seconds (the match ends in solo).
 - Someone who was just robbed stays alert for a few seconds: their cone widens and they turn to face the nearest gull.
 - Steals within 3.5 seconds of each other chain a combo, up to x5.
-- A dashed ring marks the food a swoop from where you are would grab.
+- A small reticle ahead of your gull shows where a swoop would come down. When food is in reach, brackets mark it: gold means a clean steal, white means you'd be seen and shooed, red (with **SWAT!**) means you'd lose a feather.
+- Food held by a grump twinkles: it's worth double.
+
+## Your gull
+
+Press **Customize your gull** on the title screen (or **Customize** in the lobby) to pick a name, plumage, scarf color, hat and eyewear. The scarf color is also your color on the minimap and scoreboard. Everyone in a match sees your look; it's saved in your browser.
 
 On a computer, choose **Controls: Mouse** (point to fly, click to swoop) or **Controls: Keyboard** (WASD or arrow keys to fly, Space/J/K to swoop) on the title screen or in the pause menu. Phones use drag to fly and tap to swoop.
 

@@ -128,7 +128,7 @@ const MAX_ROOMS_CREATED_PER_IP = 20;
 
 // ---------- rooms ----------
 // room: { name, pub, players: Map(id -> player), match, nextSlot, lastEnd }
-// player: { id, tok, ws, nick, col, st, pl (rules state), x, y, h, a, posAt, goneAt, tokens, dropped }
+// player: { id, tok, ws, nick, col, look, st, pl (rules state), x, y, h, a, posAt, goneAt, tokens, dropped }
 const rooms = new Map();
 const byToken = new Map();
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
@@ -161,7 +161,7 @@ function lobbyMsg(room) {
   const m = room.match, conn = connected(room);
   return {
     t: 'lobby', room: room.name, pub: room.pub, leader: conn.length ? conn[0].id : null,
-    members: conn.map(p => ({ id: p.id, nick: p.nick, col: p.col, st: p.st })),
+    members: conn.map(p => ({ id: p.id, nick: p.nick, col: p.col, look: p.look, st: p.st })),
     match: m ? { id: m.M.id, left: Math.max(0, Math.round(m.M.dur - roomMt(m))) } : null,
   };
 }
@@ -218,6 +218,7 @@ function handle(room, p, m) {
       if (typeof m.nick !== 'string' || typeof m.col !== 'string') return false;
       p.nick = GH.cleanNick(m.nick);
       p.col = GH.COLS.includes(m.col) ? m.col : GH.COLS[0];
+      p.look = GH.cleanLook(m.look);
       sendLobby(room);
       return true;
     }
@@ -317,12 +318,13 @@ function attach(ws, req, ip, roomName, create) {
 function join(ws, roomName, create, hello, ip) {
   const nick = GH.cleanNick(hello.nick);
   const col = GH.COLS.includes(hello.col) ? hello.col : GH.COLS[0];
+  const look = GH.cleanLook(hello.look);
   // resume a recent session (e.g. after a Wi-Fi blip) so the score carries over
   const old = typeof hello.tok === 'string' && /^[0-9a-f]{32}$/.test(hello.tok) ? byToken.get(hello.tok) : null;
   if (old && !create && old.room.name === roomName && old.room.players.get(old.p.id) === old.p) {
     const { p, room } = old;
     if (p.ws && p.ws !== ws) p.ws.close(4004, 'replaced');
-    Object.assign(p, { ws, nick, col, goneAt: 0 });
+    Object.assign(p, { ws, nick, col, look, goneAt: 0 });
     welcome(room, p);
     return { p, room };
   }
@@ -341,7 +343,7 @@ function join(ws, roomName, create, hello, ip) {
   if (room.players.size >= MAX_PEERS_PER_ROOM) { ws.close(4001, 'room full'); return null; }
   const p = {
     id: crypto.randomBytes(6).toString('hex'), tok: crypto.randomBytes(16).toString('hex'),
-    ws, nick, col, st: 'menu', pl: null, plMatch: null, x: null, y: null, h: 0, a: 1, posAt: 0, goneAt: 0,
+    ws, nick, col, look, st: 'menu', pl: null, plMatch: null, x: null, y: null, h: 0, a: 1, posAt: 0, goneAt: 0,
     lastStealAt: -1e9,
   };
   room.players.set(p.id, p);

@@ -190,6 +190,11 @@ function spawnPoint(seed,slot){const a=(h32(seed,slot,3)%6283)/1000+slot*2.39996
   return{x:Math.round(W/2+Math.cos(a)*r),y:Math.round(W/2+Math.sin(a)*r)};}
 
 const COLS=['#ff9f1c','#3d7dd8','#e8483b','#46a36b','#8a5cc7','#ff8fb1','#2fb3b3','#ffd23f'];
+// a gull's look besides its collar: plumage (p), hat (h) and eyewear (e), each an index into
+// the page's wardrobe. Only the counts live here so the server can check them.
+const LOOK_N={p:8,h:9,e:5};
+function cleanLook(v){const o={p:0,h:0,e:0};if(!v||typeof v!=='object'||Array.isArray(v))return o;
+  for(const k in LOOK_N){const n=v[k];if(Number.isInteger(n)&&n>=0&&n<LOOK_N[k])o[k]=n;}return o;}
 function cleanNick(s){return typeof s!=='string'?'Gull':(s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g,'').trim().slice(0,14)||'Gull');}
 function cleanRoom(s){return typeof s!=='string'?'':s.toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,24);}
 
@@ -198,5 +203,5 @@ return{mulberry,h32,TAU,wrap,turnTo,lerpAng,
   FOODS,STREET_FOOD,buildEnts,walkerAt,typeFor,valueFor,restockFor,
   CONES,coneOf,bodyAt,guardPos,faceAt,foodPos,grabRadius,inCone,segDist,
   DUR,COUNTDOWN,MAX_FEATHERS,GROUND_TIME,INV_TIME,COMBO_TIME,STEAL_CD,ALERT_STEAL,
-  createMatch,newPlayer,hasFoodAt,findTarget,judgeSteal,attemptSteal,tickPlayer,spawnPoint,COLS,cleanNick,cleanRoom};
+  createMatch,newPlayer,hasFoodAt,findTarget,judgeSteal,attemptSteal,tickPlayer,spawnPoint,COLS,LOOK_N,cleanLook,cleanNick,cleanRoom};
 });
