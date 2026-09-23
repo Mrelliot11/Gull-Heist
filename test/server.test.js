@@ -237,7 +237,7 @@ test('a legit steal scores and the other player sees it; a teleport does not', a
   assert.equal(ev.i, i);
   assert.equal(ev.by, A.welcome.you);
   assert.equal(ev.cnt, 1);
-  const snap = await B.wait(m => m.t === 's' && m.sc[A.welcome.you] === expect.pts, atB);
+  const snap = await B.wait(m => m.t === 's' && m.sc && m.sc[A.welcome.you] === expect.pts, atB);
   assert.equal(snap.sc[B.welcome.you], 0);
 
   // the same food again right away is gone

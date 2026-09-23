@@ -706,7 +706,7 @@ function onNet(m){
       break;
     case 's':
       if(mode!=='play'||m.id!==joinedId)break;
-      net.snap=m;cur.M.sc=m.sc||{};if(!net.clk)setClock(m.mt,0);break;
+      net.snap=m;if(m.sc&&typeof m.sc==='object')cur.M.sc=m.sc;if(!net.clk)setClock(m.mt,0);break;
     case 'ev':
       if(mode==='play'&&cur.M.ents[m.i]){const M=cur.M,e=M.ents[m.i];M.cnt[m.i]=m.cnt;M.fu[m.i]=m.fu;M.al[m.i]=m.al;
         if(m.by!==net.me&&e.angryT<=0){e.angryT=1.8;if(m.k==='steal')burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a'],8,60);}}
