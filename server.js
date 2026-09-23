@@ -127,7 +127,7 @@ const roomsCreatedPerIp = new Map(); // ip -> new (never-before-seen) rooms this
 const MAX_ROOMS_CREATED_PER_IP = 20;
 
 // ---------- rooms ----------
-// room: { name, pub, players: Map(id -> player), match, nextSlot, lastEnd }
+// room: { name, pub, players: Map(id -> player), match, nextSlot, lastEnd, opts: { mode, pu } }
 // player: { id, tok, ws, nick, col, look, st, pl (rules state), x, y, h, a, posAt, goneAt, tokens, dropped }
 const rooms = new Map();
 const byToken = new Map();
@@ -162,7 +162,8 @@ function lobbyMsg(room) {
   return {
     t: 'lobby', room: room.name, pub: room.pub, leader: conn.length ? conn[0].id : null,
     members: conn.map(p => ({ id: p.id, nick: p.nick, col: p.col, look: p.look, st: p.st })),
-    match: m ? { id: m.M.id, left: Math.max(0, Math.round(m.M.dur - roomMt(m))) } : null,
+    match: m ? { id: m.M.id, left: Math.max(0, Math.round(m.M.dur - roomMt(m))), mode: m.M.mode } : null,
+    opts: room.opts,
   };
 }
 function sendLobby(room) { broadcast(room, lobbyMsg(room)); }
@@ -178,12 +179,15 @@ function matchMsg(room, p) {
   return {
     t: 'match', id: M.id, seed: M.seed, dur: M.dur, mt, cnt: M.cnt, fu: M.fu, al: M.al,
     spawn: [sp.x, sp.y], f: p.pl.feathers, ground: Math.max(0, p.pl.groundUntil - mt),
+    mode: M.mode, pu: M.pus.length ? 1 : 0, pg: M.pg, dz: M.dz, fx: p.pl.fx, sh: p.pl.shield, g: goldRow(M),
   };
 }
+function goldRow(M) { const G = M.gold; return G ? [G.by || 0, Math.round(G.x), Math.round(G.y)] : undefined; }
 function startMatch(room) {
   const id = 'm' + crypto.randomBytes(4).toString('hex');
   const seed = crypto.randomBytes(4).readUInt32LE(0) & 0x7fffffff;
-  room.match = { M: GH.createMatch(id, seed, GH.DUR), t0: Date.now(), names: {} };
+  const o = room.opts;
+  room.match = { M: GH.createMatch(id, seed, GH.MODES[o.mode].dur, o), t0: Date.now(), names: {} };
   room.nextSlot = 0;
   for (const p of connected(room)) if (p.st === 'lobby' || p.st === 'results') send(p, matchMsg(room, p));
   sendLobby(room);
@@ -197,6 +201,9 @@ function endMatch(room) {
   }).sort((a, b) => b[3] - a[3]);
   broadcast(room, { t: 'end', id: m.M.id, rows });
   sendLobby(room);
+}
+function dropGold(room, x, y, mt) {
+  if (GH.goldDrop(room.match.M, x, y, mt)) broadcast(room, { t: 'gold', k: 'drop', x: Math.round(x), y: Math.round(y) });
 }
 function gullsIn(room) {
   const out = [];
@@ -228,6 +235,15 @@ function handle(room, p, m) {
       if (p.st !== m.st) { p.st = m.st; sendLobby(room); }
       return true;
     }
+    case 'opts': {
+      const md = GH.MODES[m.mode];
+      if (typeof m.mode !== 'string' || !md || !md.mp) return false;
+      if (room.match) return true;
+      if (!room.pub && leaderOf(room) !== p.id) { send(p, { t: 'err', m: 'Only the room leader can pick the mode.' }); return true; }
+      room.opts = { mode: m.mode, pu: !!m.pu };
+      sendLobby(room);
+      return true;
+    }
     case 'start': {
       if (room.match) return true;
       if (!room.pub && leaderOf(room) !== p.id) { send(p, { t: 'err', m: 'Only the room leader can start.' }); return true; }
@@ -247,8 +263,8 @@ function handle(room, p, m) {
       // when the sender sampled this position, so others can interpolate on real times
       const mt = roomMt(room.match);
       p.pt = m.mt === undefined ? mt : Math.max(mt - 0.5, Math.min(mt, m.mt));
-      { // never let a reported position move faster than a gull can fly
-        const dt = Math.min(0.25, (now - p.posAt) / 1000), lim = MAX_SPEED * dt + 10;
+      { // never let a reported position move faster than a gull can fly (a tailwind is faster)
+        const dt = Math.min(0.25, (now - p.posAt) / 1000), lim = MAX_SPEED * GH.speedMult(p.pl, mt) * dt + 10;
         const dx = m.x - p.x, dy = m.y - p.y, d = Math.hypot(dx, dy);
         const k = d > lim ? lim / d : 1;
         p.x += dx * k; p.y += dy * k;
@@ -266,15 +282,38 @@ function handle(room, p, m) {
       // client can't shrink the cooldown by backdating the judged time of its steal attempts
       if (mt - p.lastStealAt < GH.STEAL_CD) { reply({ k: 'bad' }); return true; }
       // the claimed spot must be close to where the server last saw this gull
-      if (Math.hypot(m.x - p.x, m.y - p.y) > 60) { reply({ k: 'far' }); return true; }
+      if (Math.hypot(m.x - p.x, m.y - p.y) > 60 * GH.speedMult(pl, mt)) { reply({ k: 'far' }); return true; }
       // judge at the moment the client saw it, allowing for up to half a second of lag
       const tc = Math.max(mt - 0.5, Math.min(mt, m.mt));
       const r = GH.attemptSteal(M, pl, m.i, m.x, m.y, tc, gullsIn(room), { margin: 0.12, slack: 14 });
       if (r.k !== 'bad' && r.k !== 'far' && r.k !== 'gone') p.lastStealAt = mt;
       reply({ k: r.k, pts: r.pts, combo: r.combo, type: r.type, f: pl.feathers, ground: Math.max(0, pl.groundUntil - mt) });
-      if (r.k === 'steal' || r.k === 'swat' || r.k === 'shoo') {
+      if (r.k === 'steal' || r.k === 'swat' || r.k === 'shoo' || r.k === 'block') {
         broadcast(room, { t: 'ev', k: r.k, i: m.i, by: p.id, cnt: M.cnt[m.i], fu: M.fu[m.i], al: M.al[m.i] });
       }
+      if (r.k === 'swat' && M.gold && M.gold.by === p.id) dropGold(room, p.x, p.y, mt);
+      return true;
+    }
+    case 'pick': { // fly through a power-up; judged where the server last saw this gull
+      if (!Number.isInteger(m.k)) return false;
+      const match = room.match;
+      if (!match || p.plMatch !== match.M.id || p.st !== 'play' || p.x == null) return true;
+      const M = match.M, mt = roomMt(match);
+      const r = GH.attemptPickup(M, p.pl, m.k, p.x, p.y, mt, { slack: 30, grace: 0.4 });
+      if (r.k !== 'pu') { send(p, { t: 'pu', k: m.k, no: r.k }); return true; }
+      broadcast(room, { t: 'pu', k: m.k, by: p.id, type: r.type, x: Math.round(p.x), y: Math.round(p.y), mt: Math.round(mt * 1000) / 1000 });
+      return true;
+    }
+    case 'gold': { // pick up the loose Golden Chip, or snatch it from its carrier
+      const match = room.match;
+      if (!match || !match.M.gold || p.plMatch !== match.M.id || p.st !== 'play' || p.x == null) return true;
+      const M = match.M, mt = roomMt(match), G = M.gold;
+      if (mt - p.lastGoldAt < 0.25) return true;
+      p.lastGoldAt = mt;
+      const h = G.by ? room.players.get(G.by) : null;
+      if (G.by && !h) return true;
+      const r = GH.goldGrab(M, p.pl, p.x, p.y, mt, h ? h.x : 0, h ? h.y : 0, { slack: 30 });
+      if (r.k === 'pick' || r.k === 'mug') broadcast(room, { t: 'gold', k: r.k, by: p.id, from: r.from, x: Math.round(p.x), y: Math.round(p.y) });
       return true;
     }
   }
@@ -341,14 +380,14 @@ function join(ws, roomName, create, hello, ip) {
     const made = (roomsCreatedPerIp.get(ip) || 0) + 1;
     if (made > MAX_ROOMS_CREATED_PER_IP) { ws.close(4002, 'server full'); return null; }
     roomsCreatedPerIp.set(ip, made);
-    room = { name, pub: name === 'public', players: new Map(), match: null, nextSlot: 0 };
+    room = { name, pub: name === 'public', players: new Map(), match: null, nextSlot: 0, opts: { mode: 'classic', pu: true } };
     rooms.set(name, room);
   }
   if (room.players.size >= MAX_PEERS_PER_ROOM) { ws.close(4001, 'room full'); return null; }
   const p = {
     id: crypto.randomBytes(6).toString('hex'), tok: crypto.randomBytes(16).toString('hex'),
     ws, nick, col, look, st: 'menu', pl: null, plMatch: null, x: null, y: null, h: 0, a: 1, posAt: 0, goneAt: 0,
-    lastStealAt: -1e9,
+    lastStealAt: -1e9, lastGoldAt: -1e9,
   };
   room.players.set(p.id, p);
   byToken.set(p.tok, { p, room });
@@ -410,8 +449,15 @@ const loop = setInterval(() => {
         if (p.ws && p.st === 'play' && p.x != null) ps.push([p.id, Math.round(p.x), Math.round(p.y), Math.round(p.h * 100) / 100, Math.round(p.a * 100) / 100, p.pl.groundUntil > mt ? 1 : 0, Math.round((p.pt ?? mt) * 1000) / 1000]);
       }
     }
+    const G = m.M.gold;
+    if (G && G.by) { // the chip goes where its carrier goes, and falls when they can't hold it
+      const h = room.players.get(G.by);
+      if (!h || !h.ws || h.st !== 'play' || h.plMatch !== m.M.id || h.pl.groundUntil > mt) dropGold(room, h ? h.x : G.x, h ? h.y : G.y, mt);
+      else { G.x = h.x; G.y = h.y; GH.goldTick(m.M, mt); }
+    }
     // scores only change on a steal; resend once a second anyway for players who just joined
     const s = { t: 's', id: m.M.id, mt: Math.round(mt * 1000) / 1000, p: ps };
+    if (G) s.g = goldRow(m.M);
     const scJson = JSON.stringify(sc);
     if (scJson !== m.scSent || tickN % 15 === 0) { s.sc = sc; m.scSent = scJson; }
     broadcast(room, s, p => p.st === 'play', true);

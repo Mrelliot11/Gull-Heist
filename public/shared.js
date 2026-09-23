@@ -63,16 +63,18 @@ const GSHIRT=['#5d6470','#6b5a4a','#4a5a4f'];
 function neighbors(i,j){return[[i+1,j],[i-1,j],[i,j+1],[i,j-1]].filter(n=>n[0]>=0&&n[0]<NS&&n[1]>=0&&n[1]<NS);}
 function pickNextR(to,from,r){const ns=neighbors(to[0],to[1]);const f=ns.filter(n=>!(from&&n[0]===from[0]&&n[1]===from[1]));const a=f.length?f:ns;return a[(r()*a.length)|0];}
 const pickR=(arr,r)=>arr[(r()*arr.length)|0];
-function buildEnts(seed){
+// crowd: extra walkers (Frenzy), added after everyone else so the usual cast keeps its indices
+function buildEnts(seed,crowd){
   const r=mulberry(seed>>>0),ents=[];
-  for(let k=0;k<46;k++){
+  const walker=k=>{
     const rr=mulberry((seed^Math.imul(k+1,0x9E3779B1))>>>0);
     const s=[(rr()*NS)|0,(rr()*NS)|0];
     const grump=r()<0.25;
     ents.push({kind:'walk',rr,route:[s,pickNextR(s,null,rr)],phase:r()*P*0.999,speed:26+r()*20,off:(r()<.5?-1:1)*59,grump,
       startFood:r()<0.72,first:4+r()*10,skin:pickR(SKIN,r),hair:pickR(HAIR,r),shirt:grump?pickR(GSHIRT,r):pickR(SHIRT,r),
       x:0,y:0,face:NaN,walk:r()*6,angryT:0});
-  }
+  };
+  for(let k=0;k<46;k++)walker(k);
   BLANKET_SPOTS.forEach(([x,y])=>{
     [[x-9,y-4,'park1'],[x+10,y+5,'park2']].forEach(([sx,sy,menu])=>ents.push({kind:'sit',x:sx,y:sy,menu,grump:false,startFood:true,
       ph:r()*TAU,ph2:r()*TAU,w1:0.35+r()*0.35,w2:0.9+r()*0.6,skin:pickR(SKIN,r),hair:pickR(HAIR,r),shirt:pickR(SHIRT,r),face:0,walk:0,angryT:0}));
@@ -81,6 +83,7 @@ function buildEnts(seed){
     ph:r()*TAU,ph2:r()*TAU,w1:0.35+r()*0.35,w2:0.9+r()*0.6,skin:pickR(SKIN,r),hair:pickR(HAIR,r),shirt:k===1?GSHIRT[0]:pickR(SHIRT,r),face:0,walk:0,angryT:0}));
   CART_SPOTS.forEach(([x,y,f,c])=>ents.push({kind:'cart',x,y,cfood:f,col:c,startFood:true,ph:r()*TAU,ph2:r()*TAU,w1:0.35+r()*0.25,w2:0.8+r()*0.5,
     skin:pickR(SKIN,r),hair:pickR(HAIR,r),face:0,angryT:0}));
+  for(let k=0;k<(crowd|0);k++)walker(46+k);
   return ents;
 }
 // Walkers stay on the sidewalk; on the outer streets the sidewalk is always the city side.
@@ -141,11 +144,29 @@ function segDist(ax,ay,bx,by,px,py){const vx=bx-ax,vy=by-ay,l=vx*vx+vy*vy;let u=
 
 // ================= matches =================
 const DUR=90,COUNTDOWN=3,MAX_FEATHERS=3,GROUND_TIME=6,INV_TIME=2.2,COMBO_TIME=3.5,MAX_COMBO=5,STEAL_CD=0.55;
-function createMatch(id,seed,dur){
-  const ents=buildEnts(seed);
-  return{id,seed,dur:dur||DUR,ents,cnt:ents.map(()=>0),fu:ents.map(e=>e.startFood?0:Math.round(e.first*10)/10),al:ents.map(()=>0),sc:{}};
+// Game modes. Classic is the game as it always was. crowd: extra walkers; restock: how much
+// sooner food comes back; allFood: everyone starts with lunch; puEvery: seconds between
+// power-ups; bonus: each steal adds time (Rush); gold: the Golden Chip is in play.
+// solo / mp: where the mode can be picked.
+const MODES={
+  classic:{n:'Classic',dur:DUR,solo:1,mp:1},
+  frenzy:{n:'Frenzy',dur:60,crowd:24,restock:0.5,allFood:1,puEvery:4,solo:1,mp:1},
+  rush:{n:'Rush',dur:30,bonus:1,solo:1,mp:0},
+  gold:{n:'Golden Chip',dur:120,gold:1,solo:0,mp:1},
+};
+const modeOf=M=>MODES[M&&M.mode]||MODES.classic;
+// o: {mode, pu}. Without it a match is Classic with no power-ups, exactly as before modes existed.
+function createMatch(id,seed,dur,o){o=o||{};
+  const mode=MODES[o.mode]?o.mode:'classic',md=MODES[mode];
+  const ents=buildEnts(seed,md.crowd);
+  const M={id,seed,dur:dur||DUR,ents,cnt:ents.map(()=>0),fu:ents.map(e=>e.startFood||md.allFood?0:Math.round(e.first*10)/10),al:ents.map(()=>0),sc:{}};
+  M.mode=mode;M.dz=ents.map(()=>0);M.pus=o.pu?puSchedule(seed,mode):[];M.pg=M.pus.map(()=>0);
+  if(md.gold)M.gold={by:null,x:GOLD_HOME.x,y:GOLD_HOME.y,at:0,safe:0,free:0};
+  return M;
 }
-function newPlayer(id){return{id,feathers:MAX_FEATHERS,invUntil:0,groundUntil:0,comboN:0,comboUntil:0,lastTry:-1e9};}
+// fx: match time until which each timed power-up lasts; shield: one swat blocked
+function newPlayer(id){return{id,feathers:MAX_FEATHERS,invUntil:0,groundUntil:0,comboN:0,comboUntil:0,lastTry:-1e9,fx:{wind:0,cloak:0,beak:0,dbl:0},shield:0};}
+const fxOn=(pl,k,t)=>!!(pl&&pl.fx&&pl.fx[k]>t);
 function hasFoodAt(M,i,t){return t>=0&&M.fu[i]<=t;}
 // which food a gull at (x,y) would snatch: the closest available one in reach.
 // px,py: where the gull was a moment ago, so fast swoops can't pass through a target.
@@ -164,25 +185,99 @@ function judgeSteal(M,pl,i,x,y,t,gulls,o){o=o||{};
   if(pl.groundUntil>t)return{k:'bad'};
   if(!hasFoodAt(M,i,t))return{k:'gone'};
   const b=bodyAt(e,t),face=faceAt(e,t,M.al[i],gulls),fp=foodPos(e,b,face);
-  if(Math.hypot(fp.x-x,fp.y-y)>grabRadius(e)+(o.slack||0))return{k:'far'};
+  if(Math.hypot(fp.x-x,fp.y-y)>grabRadius(e)+(o.slack||0)+reach(pl,t))return{k:'far'};
   const c=coneOf(e,M.al[i]>t);
-  if(inCone(guardPos(e,b),face,x,y,c.half-(o.margin||0),c.range-(o.margin?8:0)))return{k:c.kind==='swat'&&pl.invUntil<=t?'swat':'shoo'};
+  // a screeched (dazed) person sees nothing; camouflage fools regular people, not grumps or vendors
+  const blind=(M.dz&&M.dz[i]>t)||(c.kind==='shoo'&&fxOn(pl,'cloak',t));
+  if(!blind&&inCone(guardPos(e,b),face,x,y,c.half-(o.margin||0),c.range-(o.margin?8:0)))
+    return{k:c.kind==='swat'&&pl.invUntil<=t?(pl.shield?'block':'swat'):'shoo'};
   const type=typeFor(M.seed,i,e,M.cnt[i]);const combo=pl.comboUntil>t?Math.min(MAX_COMBO,pl.comboN+1):1;
-  return{k:'steal',type,combo,pts:valueFor(e,type)*combo,cart:e.kind==='cart'};
+  return{k:'steal',type,combo,pts:valueFor(e,type)*combo*(fxOn(pl,'dbl',t)?2:1),cart:e.kind==='cart'};
 }
 // judge and apply. Returns the outcome with the new state the client needs.
 function attemptSteal(M,pl,i,x,y,t,gulls,o){
   const r=judgeSteal(M,pl,i,x,y,t,gulls,o);
   if(r.k==='bad'||r.k==='far'||r.k==='gone')return r;
   pl.lastTry=t;
-  if(r.k==='steal'){M.cnt[i]++;M.fu[i]=Math.round((t+restockFor(M.seed,i,M.ents[i],M.cnt[i]))*10)/10;M.al[i]=t+ALERT_STEAL;
-    pl.comboN=r.combo;pl.comboUntil=t+COMBO_TIME;M.sc[pl.id]=(M.sc[pl.id]||0)+r.pts;}
+  const md=modeOf(M);
+  if(r.k==='steal'){M.cnt[i]++;M.fu[i]=Math.round((t+restockFor(M.seed,i,M.ents[i],M.cnt[i])*(md.restock||1))*10)/10;M.al[i]=t+ALERT_STEAL;
+    pl.comboN=r.combo;pl.comboUntil=t+COMBO_TIME;M.sc[pl.id]=(M.sc[pl.id]||0)+r.pts;
+    if(md.bonus){r.bonus=rushBonus(r);M.dur+=r.bonus;}}
   else{M.al[i]=Math.max(M.al[i],t+ALERT_TRY);
+    if(r.k==='block'){pl.shield=0;pl.invUntil=t+INV_TIME;}
     if(r.k==='swat'){pl.feathers=Math.max(0,pl.feathers-1);pl.invUntil=t+INV_TIME;pl.comboN=0;pl.comboUntil=0;
       if(pl.feathers<=0){pl.groundUntil=t+GROUND_TIME;}}}
   r.feathers=pl.feathers;r.ground=pl.groundUntil>t?pl.groundUntil-t:0;r.cnt=M.cnt[i];r.fu=M.fu[i];r.al=M.al[i];
   return r;
 }
+// Rush: seconds a steal adds to the clock
+function rushBonus(r){return(r.cart?4:2)+(r.combo>=3?1:0);}
+
+// ================= power-ups =================
+// Power-ups hover over the streets on a timetable fixed by the match seed, so the page and the
+// server agree on where and when without sending it. The first gull to fly through one gets it.
+// dur: seconds it lasts (0: shield waits for a swat, screech happens at once); w: how common.
+const PU={
+  wind:{n:'Tailwind',dur:6,w:3},   cloak:{n:'Camouflage',dur:6,w:2}, beak:{n:'Big beak',dur:8,w:3},
+  shield:{n:'Shield feather',dur:0,w:2}, dbl:{n:'Double loot',dur:8,w:2}, screech:{n:'Screech',dur:0,w:2},
+};
+const PU_KEYS=Object.keys(PU),PU_W=PU_KEYS.reduce((s,k)=>s+PU[k].w,0);
+const PU_FIRST=4,PU_EVERY=8,PU_LIFE=13,PU_R=26,WIND=1.5,BEAK=12,SCREECH_R=150,SCREECH_TIME=3.5;
+function puSchedule(seed,mode){
+  const md=MODES[mode]||MODES.classic,every=md.puEvery||PU_EVERY,end=md.bonus?300:md.dur,out=[];
+  for(let k=0,t=PU_FIRST;t<end-2;k++,t+=every){
+    let w=h32(seed,k,11)%PU_W,type=PU_KEYS[0];
+    for(const key of PU_KEYS){if(w<PU[key].w){type=key;break;}w-=PU[key].w;}
+    // somewhere along a street, away from the city's edge
+    const g=h32(seed,k,12),line=nodeXY((g>>>1)%NS),along=Math.round(90+((g>>>8)%1000)/1000*(W-180));
+    out.push({type,x:g&1?along:line,y:g&1?line:along,t0:t,t1:t+PU_LIFE});
+  }
+  return out;
+}
+// tailwind: how much faster than usual the gull may fly (the server's speed check uses it)
+function speedMult(pl,t){return fxOn(pl,'wind',t)?WIND:1;}
+// big beak: extra grab reach
+function reach(pl,t){return fxOn(pl,'beak',t)?BEAK:0;}
+// judge taking power-up k by a gull at (x,y) at time t, without changing anything
+function judgePickup(M,pl,k,x,y,t,o){o=o||{};
+  const s=M.pus&&M.pus[k];
+  if(!s||t<0||t>M.dur||pl.groundUntil>t)return{k:'bad'};
+  if(M.pg[k]||t<s.t0||t>s.t1+(o.grace||0))return{k:'gone'};
+  if(Math.hypot(s.x-x,s.y-y)>PU_R+(o.slack||0))return{k:'far'};
+  return{k:'pu',type:s.type};
+}
+// apply a pickup (clients mirror the server's with pl = null for someone else's)
+function applyPickup(M,pl,k,x,y,t){
+  const s=M.pus[k];M.pg[k]=1;
+  if(pl){if(s.type==='shield')pl.shield=1;else if(PU[s.type].dur)pl.fx[s.type]=t+PU[s.type].dur;}
+  return s.type==='screech'?screech(M,x,y,t):null;
+}
+function attemptPickup(M,pl,k,x,y,t,o){const r=judgePickup(M,pl,k,x,y,t,o);if(r.k==='pu')r.dazed=applyPickup(M,pl,k,x,y,t);return r;}
+// everyone near (x,y) is stunned for a moment: they see nothing
+function screech(M,x,y,t){const out=[];
+  M.ents.forEach((e,i)=>{const o=guardPos(e,bodyAt(e,t));if(Math.hypot(o.x-x,o.y-y)<SCREECH_R){M.dz[i]=Math.round((t+SCREECH_TIME)*1000)/1000;out.push(i);}});
+  return out;}
+
+// ================= the Golden Chip =================
+// One golden fry. Whoever carries it scores GOLD_PTS a second but flies a little slower.
+// Swoop onto the carrier to snatch it; a swat or a grounding drops it where it happened.
+const GOLD_R=28,GOLD_MUG=34,GOLD_PTS=5,GOLD_SAFE=1.5,GOLD_SLOW=0.88,GOLD_HOME={x:FX,y:FY-72};
+// a gull at (x,y) goes for the chip: pick it up when it's loose, or snatch it from the carrier at (hx,hy)
+function goldGrab(M,pl,x,y,t,hx,hy,o){o=o||{};const G=M.gold;
+  if(!G||t<0||t>M.dur||pl.groundUntil>t||G.by===pl.id)return{k:'bad'};
+  if(!G.by){if(t<G.free)return{k:'bad'};if(Math.hypot(G.x-x,G.y-y)>GOLD_R+(o.slack||0))return{k:'far'};
+    G.by=pl.id;G.at=t;G.safe=t+GOLD_SAFE;return{k:'pick'};}
+  if(t<G.safe)return{k:'safe'};
+  if(Math.hypot(hx-x,hy-y)>GOLD_MUG+(o.slack||0))return{k:'far'};
+  const from=G.by;G.by=pl.id;G.at=t;G.safe=t+GOLD_SAFE;return{k:'mug',from};
+}
+function goldDrop(M,x,y,t){const G=M.gold;if(!G||!G.by)return false;
+  G.by=null;G.x=Math.max(20,Math.min(W-20,x));G.y=Math.max(20,Math.min(W-20,y));G.free=t+0.8;return true;}
+// call regularly: pays the carrier for every whole second held. Returns the points paid.
+function goldTick(M,t){const G=M.gold;if(!G||!G.by)return 0;let n=0;
+  while(t-G.at>=1){G.at+=1;n+=GOLD_PTS;}
+  if(n)M.sc[G.by]=(M.sc[G.by]||0)+n;return n;}
+
 // call regularly: gives feathers back after being grounded
 function tickPlayer(pl,t){if(pl.groundUntil&&t>=pl.groundUntil){pl.groundUntil=0;pl.feathers=MAX_FEATHERS;pl.invUntil=t+2;return true;}return false;}
 // spread-out spawn points around the middle of the city
@@ -203,5 +298,7 @@ return{mulberry,h32,TAU,wrap,turnTo,lerpAng,
   FOODS,STREET_FOOD,buildEnts,walkerAt,typeFor,valueFor,restockFor,
   CONES,coneOf,bodyAt,guardPos,faceAt,foodPos,grabRadius,inCone,segDist,
   DUR,COUNTDOWN,MAX_FEATHERS,GROUND_TIME,INV_TIME,COMBO_TIME,STEAL_CD,ALERT_STEAL,
-  createMatch,newPlayer,hasFoodAt,findTarget,judgeSteal,attemptSteal,tickPlayer,spawnPoint,COLS,LOOK_N,cleanLook,cleanNick,cleanRoom};
+  createMatch,newPlayer,hasFoodAt,findTarget,judgeSteal,attemptSteal,tickPlayer,spawnPoint,COLS,LOOK_N,cleanLook,cleanNick,cleanRoom,
+  MODES,modeOf,rushBonus,fxOn,PU,PU_KEYS,PU_R,PU_LIFE,WIND,BEAK,SCREECH_R,SCREECH_TIME,puSchedule,speedMult,reach,judgePickup,applyPickup,attemptPickup,screech,
+  GOLD_R,GOLD_MUG,GOLD_PTS,GOLD_SAFE,GOLD_SLOW,GOLD_HOME,goldGrab,goldDrop,goldTick};
 });
