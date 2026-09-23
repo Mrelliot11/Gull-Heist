@@ -1407,8 +1407,9 @@ function drawPreviews(){
 // the second after a change is skipped: it pays for redrawing the cached ground and sprites
 function setRes(i){res.i=i;res.settle=1;applyRes();try{localStorage.setItem('gullheist.res',String(i));}catch(e){}}
 // iv: the frame interval being aimed for; "slow" and "fast" are judged against it
+// frame rate is given up before resolution: this only acts once the frame rate is at its floor
 function trackRes(ms,iv){
-  if(!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250){res.win.length=0;res.winAt=0;return;}
+  if(!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250||!fpsAtFloor()){res.win.length=0;res.winAt=0;return;}
   const t=now();if(!res.winAt)res.winAt=t;
   res.win.push(ms);if(t-res.winAt<1000||res.win.length<10)return;
   const w=res.win.sort((a,b)=>a-b),med=w[w.length>>1];res.win.length=0;res.winAt=t;
@@ -1444,9 +1445,10 @@ function dbgRaf(ts){
   const rm=dbgPct(dbg.raf,0.5),dm=dbgPct(dbg.drawn,0.5),t=now();
   const ua=(navigator.userAgent.match(/(Firefox|Chrome|Safari)\/[\d]+/)||['?'])[0];
   dbg.el.textContent=[
-    `screen   ${rm?Math.round(1000/rm):'?'} Hz (${rm.toFixed(1)} ms between browser frames)`,
+    `screen   ${Math.round(1000/fps.ref)} Hz estimated (median ${rm.toFixed(1)} ms between browser frames)`,
     `drawn    ${dm?Math.round(1000/dm):0} fps · median ${dm.toFixed(1)} ms · p95 ${dbgPct(dbg.drawn,0.95).toFixed(1)} ms`,
-    `target   ${Math.round(1000/frameInterval())} fps · battery saver ${saver?'on':'off'} · ${mode}`,
+    `target   ${Math.round(1000/frameInterval())} fps${fps.probing?' (trying)':''} · play range ${Math.round(1000/(kMax()*fps.ref))}–${Math.round(1000/(kMin()*fps.ref))}${t<fps.probeAt?` · next try faster in ${Math.ceil((fps.probeAt-t)/1000)}s`:''}`,
+    `mode     ${mode} · battery saver ${saver?'on':'off'}`,
     `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms per drawn frame`,
     `res      ${RES_LEVELS[resLevel()]*100}% · ${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
     `adaptive ${res.pending?'judging a step down':'steady'}${t<res.noDownUntil?` · no step down for ${Math.ceil((res.noDownUntil-t)/1000)}s`:''}${t<res.noUpUntil?` · no step up for ${Math.ceil((res.noUpUntil-t)/1000)}s`:''}`,
@@ -1455,20 +1457,54 @@ function dbgRaf(ts){
 }
 function dbgFrame(ts,work){if(dbg.lastDrawn)dbgPush(dbg.drawn,ts-dbg.lastDrawn);dbg.lastDrawn=ts;dbgPush(dbg.work,work);}
 
+// ================= frame rate =================
+// Frames are drawn on every k-th screen refresh so pacing stays even: 120 or 60 fps on a
+// 120 Hz screen, 90 or 45 on 90 Hz. Adaptive resolution only steps in at the slowest of these.
+// Play starts at the screen's own rate (up to ~125 fps) and
+// steps down when more than 15% of frames come late; the faster rate is tried again later,
+// waiting twice as long after each try that fails. Menus and battery saver run near 30 fps.
+const fps={ref:1000/60,raw:[],lastRaf:0,refAt:0,win:[],winAt:0,backoff:10000,probing:false,
+  k:Math.max(1,(()=>{try{return +localStorage.getItem('gullheist.fpsk')||1;}catch(e){return 1;}})()|0)};
+fps.probeAt=fps.k>1?performance.now()+30000:0; // a device that needed a slower rate last time
+// refresh interval: the mean of the gaps between browser frames that cluster at the shortest
+function estimateRefresh(){const s=[...fps.raw].sort((a,b)=>a-b),lo=s[Math.floor(s.length*0.1)];let sum=0,n=0;
+  for(const x of s)if(x>=lo*0.8&&x<=lo*1.3){sum+=x;n++;}return Math.max(4,Math.min(34,n?sum/n:lo));}
+const kMin=()=>Math.max(1,Math.ceil(8/fps.ref));
+const kMax=()=>Math.max(kMin(),Math.floor(1000/44/fps.ref)); // slowest play rate: 60 on 120 Hz, 45 on 90 Hz
+const fpsK=()=>Math.max(kMin(),Math.min(kMax(),fps.k));
+const fpsAtFloor=()=>saver||fpsK()>=kMax();
+function frameInterval(){
+  if(!((mode==='solo'||mode==='play')&&!paused&&!menuOpen)||saver)return Math.max(1,Math.round(1000/30/fps.ref))*fps.ref;
+  return fpsK()*fps.ref;
+}
+function setFpsK(k,why){fps.k=k;dbgLog(`${Math.round(1000/(k*fps.ref))} fps: ${why}`);try{localStorage.setItem('gullheist.fpsk',String(k));}catch(e){}}
+function trackFps(ms){
+  if(!(mode==='solo'||mode==='play')||paused||menuOpen||saver||document.hidden||ms>250){fps.win.length=0;fps.winAt=0;return;}
+  const t=now();if(!fps.winAt)fps.winAt=t;
+  fps.win.push(ms);if(t-fps.winAt<1000||fps.win.length<20)return;
+  const k=fpsK(),T=k*fps.ref;let late=0;for(const x of fps.win)if(x>T*1.5)late++;
+  late/=fps.win.length;fps.win.length=0;fps.winAt=t;
+  if(late>0.15&&k<kMax()){
+    if(fps.probing)fps.backoff=Math.min(fps.backoff*2,300000);
+    fps.probing=false;fps.probeAt=t+fps.backoff;setFpsK(k+1,`${Math.round(late*100)}% of frames late`);}
+  else if(late<0.03){
+    if(fps.probing){fps.probing=false;fps.backoff=10000;} // the faster rate held up
+    else if(k>kMin()&&t>=fps.probeAt){fps.probing=true;setFpsK(k-1,'trying faster');}}
+}
+
 // ================= loop =================
-// Frames are capped at 60 fps in play and 30 in menus or with battery saver on; 90-120 Hz
-// phone screens would otherwise redraw the whole canvas up to twice as often for little gain.
-// nextFrameAt keeps an even cadence, e.g. two frames out of every three on a 90 Hz screen.
 let nextFrameAt=0;
-const frameInterval=()=>(mode==='solo'||mode==='play')&&!paused&&!menuOpen&&!saver?1000/60:1000/30;
 function frame(ts){
   requestAnimationFrame(frame);
   if(dbg)dbgRaf(ts);
+  if(fps.lastRaf){const d=ts-fps.lastRaf;if(d>0&&d<100){fps.raw.push(d);if(fps.raw.length>120)fps.raw.shift();}}
+  fps.lastRaf=ts;
+  if(ts-fps.refAt>1000&&fps.raw.length>=30){fps.refAt=ts;fps.ref=estimateRefresh();}
   const iv=frameInterval();
-  if(ts<nextFrameAt-2)return;
+  if(ts<nextFrameAt-fps.ref*0.3)return;
   nextFrameAt=ts-nextFrameAt>iv?ts+iv:nextFrameAt+iv;
   const w0=dbg?performance.now():0;
-  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackRes(ts-last,iv);last=ts;
+  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackFps(ts-last);trackRes(ts-last,iv);last=ts;
   if(!paused)update(dt,Math.min(1,raw));
   // a frozen scene (solo pause) or a menu card over most of a narrow screen: keep the last city frame
   if(bgDraws<=0&&(paused||shownScreen&&mode!=='solo'&&mode!=='play'&&VW<660)){drawPreviews();return;}
