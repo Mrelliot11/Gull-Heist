@@ -173,6 +173,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
       <p class="best" id="bestTitle">Best solo haul: 0</p>
       <div class="row"><button class="btn ghost ctrlBtn" id="ctrlBtn" hidden>Controls: Mouse</button><button class="btn ghost" id="soundBtn" aria-pressed="true">Sound on</button></div>
     </div>
+    <div class="row"><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
   </div>
 </section>
 
@@ -242,7 +243,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     <h2 class="over-h disp" id="pauseTitle">Perched</h2>
     <p class="tag" style="text-align:center" id="pauseText">The fries will wait. Probably.</p>
     <div class="row"><button class="btn" id="resumeBtn">Resume</button><button class="btn ghost" id="quitBtn">Quit</button></div>
-    <div class="row" style="justify-content:center;margin-top:10px"><button class="btn ghost ctrlBtn" id="ctrlBtnP" hidden>Controls: Mouse</button></div>
+    <div class="row" style="justify-content:center;margin-top:10px"><button class="btn ghost ctrlBtn" id="ctrlBtnP" hidden>Controls: Mouse</button><button class="btn ghost saverBtn" aria-pressed="false">Battery saver: off</button></div>
   </div>
 </section>
 
@@ -280,7 +281,11 @@ let DPR=1,baseDPR=1,VW=0,VH=0,Z=1;
 const RES_LEVELS=[1,0.8,0.65,0.5];
 const res={i:Math.min(RES_LEVELS.length-1,Math.max(0,(()=>{try{return +localStorage.getItem('gullheist.res')||0;}catch(e){return 0;}})()|0)),
   win:[],winAt:0,good:0,pending:null,upAt:-1e9,noDownUntil:0,noUpUntil:0};
-function applyRes(){DPR=Math.max(Math.min(baseDPR,0.6),baseDPR*RES_LEVELS[res.i]);cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
+// battery saver: 30 fps and never above the 65% resolution step
+const SAVER_LEVEL=2;
+let saver=(()=>{try{return localStorage.getItem('gullheist.saver')==='1';}catch(e){return false;}})();
+const resLevel=()=>saver?Math.max(SAVER_LEVEL,res.i):res.i;
+function applyRes(){DPR=Math.max(Math.min(baseDPR,0.6),baseDPR*RES_LEVELS[resLevel()]);cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
 // the canvas is rasterized in full every frame; 1.5x looks the same as 2x with this chunky art
 function resize(){baseDPR=Math.min(1.5,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;applyRes();
   Z=Math.max(0.8,Math.min(1.35,Math.min(VW,VH)/430));}
@@ -562,6 +567,10 @@ $('lobbyBack').addEventListener('click',toTitle);
 $('resLobby').addEventListener('click',toLobby);
 $('resMenu').addEventListener('click',toTitle);
 $('soundBtn').addEventListener('click',()=>{sound=!sound;$('soundBtn').textContent=sound?'Sound on':'Sound off';$('soundBtn').setAttribute('aria-pressed',sound);});
+function renderSaver(){document.querySelectorAll('.saverBtn').forEach(b=>{b.textContent='Battery saver: '+(saver?'on':'off');b.setAttribute('aria-pressed',saver);});}
+document.querySelectorAll('.saverBtn').forEach(b=>b.addEventListener('click',()=>{saver=!saver;store.set('gullheist.saver',saver?'1':'0');
+  res.pending=null;res.win.length=0;res.winAt=0;res.good=0;renderSaver();applyRes();}));
+renderSaver();
 $('pauseBtn').addEventListener('click',()=>openMenu(true));
 $('resumeBtn').addEventListener('click',()=>openMenu(false));
 $('quitBtn').addEventListener('click',()=>{openMenu(false);if(mode==='solo')endSolo('Flew home early');else if(mode==='play')toLobby();});
@@ -1328,28 +1337,40 @@ function drawPreviews(){
 // resolution down; the step is kept only if it made frames faster (a phone capped at 30 fps in
 // battery saver gains nothing from blur). Five fast seconds in a row step back up, and a step up
 // that turns out too slow is not retried for a minute.
-function setRes(i){res.i=i;applyRes();try{localStorage.setItem('gullheist.res',String(i));}catch(e){}}
-function trackRes(ms){
+// the second after a change is skipped: it pays for redrawing the cached ground and sprites
+function setRes(i){res.i=i;res.settle=1;applyRes();try{localStorage.setItem('gullheist.res',String(i));}catch(e){}}
+// iv: the frame interval being aimed for; "slow" and "fast" are judged against it
+function trackRes(ms,iv){
   if(!(mode==='solo'||mode==='play')||paused||menuOpen||document.hidden||ms>250){res.win.length=0;res.winAt=0;return;}
   const t=now();if(!res.winAt)res.winAt=t;
-  res.win.push(ms);if(t-res.winAt<1000||res.win.length<20)return;
+  res.win.push(ms);if(t-res.winAt<1000||res.win.length<10)return;
   const w=res.win.sort((a,b)=>a-b),med=w[w.length>>1];res.win.length=0;res.winAt=t;
+  if(res.settle){res.settle--;return;}
   if(res.pending){const p=res.pending;res.pending=null;
     if(med>p.before*0.85){setRes(p.from);res.noDownUntil=t+120000;return;}} // didn't help: undo
-  if(med>22){res.good=0;
-    if(res.i<RES_LEVELS.length-1&&t>=res.noDownUntil){
+  const lv=resLevel();
+  if(med>iv*1.32){res.good=0;
+    if(lv<RES_LEVELS.length-1&&t>=res.noDownUntil){
       if(t-res.upAt<5000)res.noUpUntil=t+60000;
-      res.pending={from:res.i,before:med};setRes(res.i+1);}}
-  else if(med<18){if(++res.good>=5&&res.i>0&&t>=res.noUpUntil){res.good=0;res.upAt=t;setRes(res.i-1);}}
+      res.pending={from:res.i,before:med};setRes(lv+1);}}
+  else if(med<iv*1.08){if(++res.good>=5&&lv>(saver?SAVER_LEVEL:0)&&t>=res.noUpUntil){res.good=0;res.upAt=t;setRes(lv-1);}}
   else res.good=0;
 }
 
 // ================= loop =================
+// Frames are capped at 60 fps in play and 30 in menus or with battery saver on; 90-120 Hz
+// phone screens would otherwise redraw the whole canvas up to twice as often for little gain.
+// nextFrameAt keeps an even cadence, e.g. two frames out of every three on a 90 Hz screen.
+let nextFrameAt=0;
+const frameInterval=()=>(mode==='solo'||mode==='play')&&!paused&&!menuOpen&&!saver?1000/60:1000/30;
 function frame(ts){
-  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.033,raw);trackRes(ts-last);last=ts;
+  requestAnimationFrame(frame);
+  const iv=frameInterval();
+  if(ts<nextFrameAt-2)return;
+  nextFrameAt=ts-nextFrameAt>iv?ts+iv:nextFrameAt+iv;
+  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackRes(ts-last,iv);last=ts;
   if(!paused)update(dt,Math.min(1,raw));
   render();
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 })();
