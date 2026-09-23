@@ -273,7 +273,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 (()=>{
 // ================= setup =================
 const cv=document.getElementById('game');
-let ctx=cv.getContext('2d'); // swapped briefly while the ground tiles are drawn
+let ctx=cv.getContext('2d',{alpha:false}); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
 let DPR=1,baseDPR=1,VW=0,VH=0,Z=1;
 // Resolution steps, as a share of baseDPR. Adaptive scaling (see trackRes) moves between them;
@@ -285,7 +285,8 @@ const res={i:Math.min(RES_LEVELS.length-1,Math.max(0,(()=>{try{return +localStor
 const SAVER_LEVEL=2;
 let saver=(()=>{try{return localStorage.getItem('gullheist.saver')==='1';}catch(e){return false;}})();
 const resLevel=()=>saver?Math.max(SAVER_LEVEL,res.i):res.i;
-function applyRes(){DPR=Math.max(Math.min(baseDPR,0.6),baseDPR*RES_LEVELS[resLevel()]);cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
+let bgDraws=2; // frames the city must still be drawn before it may be held (setting cv.width clears it)
+function applyRes(){bgDraws=2;DPR=Math.max(Math.min(baseDPR,0.6),baseDPR*RES_LEVELS[resLevel()]);cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
 // the canvas is rasterized in full every frame; 1.5x looks the same as 2x with this chunky art
 function resize(){baseDPR=Math.min(1.5,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;applyRes();
   Z=Math.max(0.8,Math.min(1.35,Math.min(VW,VH)/430));}
@@ -349,10 +350,12 @@ const HATS=['No hat','Cap','Top hat','Crown','Pirate hat','Beanie','Party hat','
 const EYES=['No eyewear','Shades','Eye patch','Monocle','Goggles'];
 // a gull at the origin facing +x, about 44 units nose to tail. c: any 2D context.
 // look: {p,h,e}; collar: scarf color (or null); folded: wings tucked in (landing / on the ground)
-function gullSprite(c,look,collar,flap,folded){
+// part: draw one layer only, for the sprite cache: 1 tail, wings and body; 2 scarf; 3 head. omitted: all
+function gullSprite(c,look,collar,flap,folded,part){
   const pl=PLUMES[look&&look.p]||PLUMES[0];
   const s=Math.sin(flap),span=folded?15:24+s*8,sd=Math.sin(flap*1.3);
   c.lineJoin='round';c.lineCap='round';c.strokeStyle=INK;c.lineWidth=1.8;
+  if(!(part>1)){
   // tail
   c.beginPath();c.moveTo(-8,-3.8);c.lineTo(-18.5,-5.6);c.quadraticCurveTo(-21.2,0,-18.5,5.6);c.lineTo(-8,3.8);c.closePath();
   c.fillStyle=pl.body;c.fill();c.stroke();
@@ -379,8 +382,10 @@ function gullSprite(c,look,collar,flap,folded){
   c.fillStyle='rgba(255,255,255,.4)';c.beginPath();c.ellipse(1,-2.6,6.5,1.4,0,0,TAU);c.fill();
   if(pl.mottle){c.fillStyle=pl.mottle;[[-5,-2],[-2,2.5],[-7,1.5],[1,-0.5],[-4,4.5]].forEach(q=>{c.beginPath();c.arc(q[0],q[1],0.8,0,TAU);c.fill();});}
   c.restore();body();c.lineWidth=1.8;c.strokeStyle=INK;c.stroke();
+  }
+  if(part===1)return;
   // scarf, with a tail that trails behind in the wind
-  if(collar){
+  if(collar&&part!==3){
     c.lineWidth=1.4;
     c.beginPath();c.moveTo(5.5,4.2);c.quadraticCurveTo(0,8+sd,-6.5,7.4+sd*2);c.lineTo(-5.4,4.8+sd*1.6);c.quadraticCurveTo(0,6.2+sd*0.6,4.6,3);c.closePath();
     c.fillStyle=collar;c.fill();c.stroke();
@@ -388,6 +393,7 @@ function gullSprite(c,look,collar,flap,folded){
     c.fillStyle='rgba(255,255,255,.35)';c.beginPath();c.ellipse(6.9,-2.2,0.8,2.4,0,0,TAU);c.fill();
     c.fillStyle=collar;c.beginPath();c.arc(5.8,4.6,1.9,0,TAU);c.fill();c.stroke();
   }
+  if(part===2)return;
   // head, beak, eyes
   c.lineWidth=1.8;c.strokeStyle=INK;
   c.beginPath();c.arc(10.5,0,5.4,0,TAU);c.fillStyle=pl.head;c.fill();c.stroke();
@@ -557,7 +563,8 @@ function renderFeathers(){feathersEl.innerHTML='';for(let i=0;i<3;i++){const s=d
 function updateBest(){$('bestTitle').textContent='Best solo haul: '+best;}
 updateBest();
 const screens=['titleScreen','lobbyScreen','wardScreen','pauseScreen','overScreen','resultsScreen'];
-function show(id){screens.forEach(s=>$(s).hidden=s!==id);}
+let shownScreen='titleScreen'; // the page opens on it
+function show(id){screens.forEach(s=>$(s).hidden=s!==id);shownScreen=id;bgDraws=2;}
 function setHud(on){hud.hidden=!on;swoopBtn.hidden=!on;if(!on){hintEl.hidden=true;joy.id=null;}}
 $('playBtn').addEventListener('click',startSolo);
 $('againBtn').addEventListener('click',startSolo);
@@ -580,7 +587,7 @@ function openMenu(v){
     $('pauseText').textContent=mode==='solo'?'The fries will wait. Probably.':'The match keeps going while this is open.';
     $('quitBtn').textContent=mode==='solo'?'Quit':'Leave match';$('pauseScreen').hidden=false;}
   else $('pauseScreen').hidden=true;
-  paused=v&&mode==='solo';menuOpen=v;if(!v)last=now();
+  paused=v&&mode==='solo';menuOpen=v;bgDraws=2;if(!v)last=now();
 }
 let hintTimer=0;
 function showHint(txt,dur){hintEl.textContent=txt;hintEl.hidden=false;hintEl.style.opacity=1;hintTimer=dur||2.5;}
@@ -956,8 +963,8 @@ function updateRemote(dt){
   }
 }
 let boardT=0;
-function renderBoard(){
-  const rows=rankRows().slice(0,5);const me=net.me;boardEl.innerHTML='';
+let boardKey='';function renderBoard(){
+  const rows=rankRows().slice(0,5);const me=net.me;const key=JSON.stringify([me,rows.map(r=>[r.id,r.nick,r.col,r.score])]);if(key===boardKey)return;boardKey=key;boardEl.innerHTML='';
   rows.forEach(r=>{const li=document.createElement('li');if(r.id===me)li.className='me';const d=document.createElement('span');d.className='dot';d.style.background=r.col;
     const nm=document.createElement('span');nm.className='nm';nm.textContent=r.nick;const s=document.createElement('span');s.textContent=r.score;li.append(d,nm,s);boardEl.appendChild(li);});
 }
@@ -1145,13 +1152,35 @@ function bubble(x,y,t,hot){ctx.font='14px "Titan One",sans-serif';const w=ctx.me
   ctx.fillRect(x-4.8,y-5.5,9.6,2.4);
   ctx.fillStyle=hot?'#fffaf0':'#e8483b';ctx.textAlign='center';ctx.fillText(t,x,y-7.8);}
 // food as held: a small drop shadow so it reads against any ground; grump food (worth double) twinkles
+// the food and its shadow come from a sprite per type, stamped on whole device pixels
+const foodSprites=new Map();let foodS=0;
 function heldFood(type,x,y,s,rich){
-  ctx.fillStyle='rgba(20,22,30,.3)';ctx.beginPath();ctx.ellipse(x+1.5,y+2.5,7*s,5*s,0,0,TAU);ctx.fill();
-  drawFood(type,x,y,s);
+  const S=DPR*Z,m=13*s,k=type+'|'+s;if(S!==foodS){foodSprites.clear();foodS=S;}
+  let c=foodSprites.get(k);
+  if(!c){c=document.createElement('canvas');c.width=c.height=Math.ceil(2*m*S);
+    const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,m*S,m*S);
+    ctx.fillStyle='rgba(20,22,30,.3)';ctx.beginPath();ctx.ellipse(1.5,2.5,7*s,5*s,0,0,TAU);ctx.fill();
+    drawFood(type,0,0,s);ctx=main;foodSprites.set(k,c);}
+  const t=ctx.getTransform();ctx.save();ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(c,Math.round(t.a*(x-m)+t.e),Math.round(t.d*(y-m)+t.f));ctx.restore();
   if(rich){const a=(Math.sin(T*5)+1)/2,r=2+a*2.2;ctx.save();ctx.translate(x+7,y-7);ctx.rotate(T*1.5);ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=0.8;
     ctx.beginPath();for(let k=0;k<8;k++){const q=k*TAU/8,rad=k%2?r*0.38:r;ctx.lineTo(Math.cos(q)*rad,Math.sin(q)*rad);}ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();}
 }
+// carts stand still, so each is drawn once per stocked / sold-out state into a sprite at its own
+// sub-pixel offset and stamped on whole device pixels. Cleared on a scale change or font load.
+const cartSprites=new Map();let cartS=0;
+if(document.fonts)document.fonts.addEventListener('loadingdone',()=>cartSprites.clear());
 function drawCart(c,i){
+  const S=DPR*Z,has=hasFood(i),k=[c.x,c.y,c.col,c.cfood,has].join();if(S!==cartS||cartSprites.size>40){cartSprites.clear();cartS=S;}
+  let e=cartSprites.get(k);
+  if(!e){const x0=Math.floor((c.x-24)*S),y0=Math.floor((c.y-19)*S),cv2=document.createElement('canvas');
+    cv2.width=Math.ceil((c.x+28)*S)-x0;cv2.height=Math.ceil((c.y+23)*S)-y0;
+    const main=ctx;ctx=cv2.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);cartShape(c,has);ctx=main;
+    e={c:cv2,x:x0,y:y0};cartSprites.set(k,e);}
+  const t=ctx.getTransform();ctx.save();ctx.setTransform(1,0,0,1,0,0);
+  ctx.drawImage(e.c,Math.round(e.x+t.e),Math.round(e.y+t.f));ctx.restore();
+}
+function cartShape(c,has){
   const x=c.x,y=c.y;
   ctx.fillStyle='rgba(20,22,30,.28)';rr(x-18,y-10,44,31,6);ctx.fill();
   ctx.fillStyle='#2b2f3a';for(const w of [[-17,-17],[11,-17],[-17,13],[11,13]]){rr(x+w[0],y+w[1],7,4,1.5);ctx.fill();}
@@ -1161,7 +1190,7 @@ function drawCart(c,i){
   ctx.fillStyle='rgba(255,255,255,.25)';ctx.fillRect(x-22,y-14,44,5);ctx.fillStyle='rgba(29,35,48,.14)';ctx.fillRect(x-22,y+9,44,5);ctx.restore();
   ctx.strokeStyle=INK;ctx.lineWidth=2;rr(x-22,y-14,44,28,6);ctx.stroke();
   for(let k=0;k<6;k++){ctx.beginPath();ctx.arc(x-18.3+k*7.4,y+14,3.7,0,Math.PI);ctx.fillStyle=k%2?'#fffaf0':c.col;ctx.fill();ctx.lineWidth=1.5;ctx.stroke();}
-  if(hasFood(i)){ctx.fillStyle='#fffaf0';ctx.beginPath();ctx.arc(x,y,11.5,0,TAU);ctx.fill();ctx.lineWidth=2;ctx.stroke();
+  if(has){ctx.fillStyle='#fffaf0';ctx.beginPath();ctx.arc(x,y,11.5,0,TAU);ctx.fill();ctx.lineWidth=2;ctx.stroke();
     ctx.strokeStyle=c.col;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,9,0,TAU);ctx.stroke();drawFood(c.cfood,x,y,1.05);}
   else{ctx.font='900 8px Nunito,sans-serif';const w=ctx.measureText('SOLD OUT').width+10;ctx.fillStyle=INK;rr(x-w/2,y-6,w,12,6);ctx.fill();
     ctx.fillStyle='#fffaf0';ctx.textAlign='center';ctx.fillText('SOLD OUT',x,y+3);}
@@ -1209,21 +1238,57 @@ function drawLanding(){
   ctx.fillStyle=col;ctx.beginPath();ctx.arc(0,0,1.8,0,TAU);ctx.fill();
   ctx.restore();ctx.lineCap='butt';
 }
-function drawTrees(L,Tp,R2,B){
-  for(const t of trees){if(t.x<L-40||t.x>R2+40||t.y<Tp-40||t.y>B+40)continue;ctx.fillStyle='rgba(20,22,30,.25)';ctx.beginPath();ctx.arc(t.x+7,t.y+8,t.r,0,TAU);ctx.fill();}
-  for(const t of trees){if(t.x<L-40||t.x>R2+40||t.y<Tp-40||t.y>B+40)continue;
-    const r=t.r,lobes=[[0.42,0.2],[-0.3,0.4],[-0.35,-0.35],[0.3,-0.42]];
+// Trees never move, so each one's shadow and canopy are drawn once into small sprites at the
+// current pixel scale, at the tree's own sub-pixel offset, and copied on whole device pixels
+// each frame, like the ground tiles. Overlapping canopies made these the priciest thing drawn.
+const treeSprites=new Map();let treeS=0;
+function treeSprite(t,S,shadow){
+  let e=treeSprites.get(t);if(!e){e={};treeSprites.set(t,e);}
+  const k=shadow?'s':'c';if(e[k])return e[k];
+  const r=t.r,cx=shadow?t.x+7:t.x,cy=shadow?t.y+8:t.y,m=shadow?r+1:r*1.05+2;
+  const x0=Math.floor((cx-m)*S),y0=Math.floor((cy-m)*S),c=document.createElement('canvas');
+  c.width=Math.ceil((cx+m)*S)-x0;c.height=Math.ceil((cy+m)*S)-y0;
+  const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);
+  if(shadow){ctx.fillStyle='rgba(20,22,30,.25)';ctx.beginPath();ctx.arc(t.x+7,t.y+8,r,0,TAU);ctx.fill();}
+  else{const lobes=[[0.42,0.2],[-0.3,0.4],[-0.35,-0.35],[0.3,-0.42]];
     ctx.strokeStyle=INK;ctx.lineWidth=2;
     ctx.beginPath();for(const l of lobes){ctx.moveTo(t.x+l[0]*r+r*0.62,t.y+l[1]*r);ctx.arc(t.x+l[0]*r,t.y+l[1]*r,r*0.62,0,TAU);}ctx.stroke();
     ctx.fillStyle='#4f8f45';ctx.beginPath();for(const l of lobes){ctx.moveTo(t.x+l[0]*r+r*0.62,t.y+l[1]*r);ctx.arc(t.x+l[0]*r,t.y+l[1]*r,r*0.62,0,TAU);}ctx.fill();
     ctx.fillStyle='#62a353';ctx.beginPath();ctx.arc(t.x-r*0.18,t.y-r*0.18,r*0.55,0,TAU);ctx.fill();
     ctx.fillStyle='#7fbf69';ctx.beginPath();ctx.arc(t.x-r*0.32,t.y-r*0.34,r*0.26,0,TAU);ctx.fill();}
+  ctx=main;return e[k]={c,x:x0,y:y0};
+}
+function drawTrees(L,Tp,R2,B){
+  const S=DPR*Z,Lpx=Math.round(L*S),Tpx=Math.round(Tp*S);if(S!==treeS){treeSprites.clear();treeS=S;}
+  ctx.setTransform(1,0,0,1,0,0);
+  for(const shadow of [true,false])for(const t of trees){if(t.x<L-40||t.x>R2+40||t.y<Tp-40||t.y>B+40)continue;
+    const s=treeSprite(t,S,shadow);ctx.drawImage(s.c,s.x-Lpx,s.y-Tpx);}
+  ctx.setTransform(S,0,0,S,-Lpx,-Tpx);
 }
 function nameTag(x,y,txt,col){
   ctx.font='900 12px Nunito,system-ui,sans-serif';ctx.textAlign='center';const w=ctx.measureText(txt).width+22;
   ctx.fillStyle='rgba(29,35,48,.82)';rr(x-w/2,y-9,w,18,9);ctx.fill();
   ctx.fillStyle=col;ctx.beginPath();ctx.arc(x-w/2+9,y,4,0,TAU);ctx.fill();
   ctx.fillStyle='#fffaf0';ctx.fillText(txt,x+5,y+4.2);
+}
+// Gulls are stamped from sprites in three layers, so the wing beat and the scarf's flutter keep
+// their own rhythms without a sprite for every pair: tail, wings and body per plume and wing
+// phase; the scarf per colour and flutter phase; the head, hat and eyewear per look. Sprites are
+// drawn at the largest in-flight scale (1.3) and cleared when the pixel scale changes.
+const GULL_BOX=[[-22,-35,15,35],[-8,-8,10,11],[1,-10,24,10]],GF=32,GD=16,gullSprites=new Map();let gullS=0;
+function gullLayer(lk,collar,flap,folded,part,S){
+  let k,f=flap;
+  if(part===1){const q=folded?-1:((Math.round(flap/TAU*GF)%GF)+GF)%GF;k='1|'+(lk?lk.p:0)+'|'+q;f=q*TAU/GF;}
+  else if(part===2){const q=((Math.round(flap*1.3/TAU*GD)%GD)+GD)%GD;k='2|'+collar+'|'+q;f=q*TAU/GD/1.3;}
+  else k='3|'+(lk?lk.p+','+lk.h+','+lk.e:'')+'|'+collar;
+  let e=gullSprites.get(k);
+  if(e){gullSprites.delete(k);gullSprites.set(k,e);return e;}
+  const b=GULL_BOX[part-1],c=document.createElement('canvas');
+  c.width=Math.ceil((b[2]-b[0])*S);c.height=Math.ceil((b[3]-b[1])*S);
+  const g=c.getContext('2d');g.setTransform(S,0,0,S,-b[0]*S,-b[1]*S);gullSprite(g,lk,collar,f,folded,part);
+  e={c,x:b[0],y:b[1],w:c.width/S,h:c.height/S};gullSprites.set(k,e);
+  if(gullSprites.size>300)gullSprites.delete(gullSprites.keys().next().value);
+  return e;
 }
 // one gull, local or remote. o: {x,y,h,alt,flap,spin?,stun?,inv?,carry?}
 function drawGull(o,lk,collar,label){
@@ -1233,8 +1298,9 @@ function drawGull(o,lk,collar,label){
   const shSpan=(o.alt<0.6?15:22+Math.sin(o.flap)*6)*ss;ctx.beginPath();ctx.moveTo(4*ss,0);ctx.quadraticCurveTo(3*ss,shSpan*0.8,-4*ss,shSpan);ctx.lineTo(-9*ss,shSpan*0.85);ctx.lineTo(-6*ss,0);
   ctx.lineTo(-9*ss,-shSpan*0.85);ctx.lineTo(-4*ss,-shSpan);ctx.quadraticCurveTo(3*ss,-shSpan*0.8,4*ss,0);ctx.fill();ctx.restore();
   if(!(o.inv>0&&Math.floor(o.inv*12)%2===0)){
+    const S=DPR*Z*1.3;if(S!==gullS){gullSprites.clear();gullS=S;}
     ctx.save();ctx.translate(o.x,o.y-lift);ctx.rotate(o.h+(o.spin||0));ctx.scale(sc,sc);
-    gullSprite(ctx,lk,collar,o.flap,o.alt<0.6);
+    for(let part=1;part<=3;part++){if(part===2&&!collar)continue;const e=gullLayer(lk,collar,o.flap,o.alt<0.6,part,S);ctx.drawImage(e.c,e.x,e.y,e.w,e.h);}
     ctx.restore();
     if(o.stun){ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=1;for(let k=0;k<3;k++){const a=T*6+k*TAU/3;const sx=o.x+Math.cos(a)*14*sc,sy=o.y-lift+Math.sin(a)*7*sc-10*sc;
       ctx.beginPath();for(let q=0;q<10;q++){const qa=q*TAU/10-Math.PI/2,rad=q%2?1.4:3.4;ctx.lineTo(sx+Math.cos(qa)*rad,sy+Math.sin(qa)*rad);}ctx.closePath();ctx.fill();ctx.stroke();}}
@@ -1370,6 +1436,9 @@ function frame(ts){
   nextFrameAt=ts-nextFrameAt>iv?ts+iv:nextFrameAt+iv;
   const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackRes(ts-last,iv);last=ts;
   if(!paused)update(dt,Math.min(1,raw));
+  // a frozen scene (solo pause) or a menu card over most of a narrow screen: keep the last city frame
+  if(bgDraws<=0&&(paused||shownScreen&&mode!=='solo'&&mode!=='play'&&VW<660)){drawPreviews();return;}
+  if(bgDraws>0)bgDraws--;
   render();
 }
 requestAnimationFrame(frame);
