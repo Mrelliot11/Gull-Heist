@@ -275,6 +275,11 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 const cv=document.getElementById('game');
 let ctx=cv.getContext('2d',{alpha:false}); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
+// Cached sprites and tiles are drawn once into their own canvases. With ?bitmaps in the address
+// they are turned into ImageBitmaps once drawn, to test browsers where copying a canvas is slow.
+const BITMAPS=(()=>{try{return new URLSearchParams(location.search).has('bitmaps')&&typeof OffscreenCanvas!=='undefined';}catch(e){return false;}})();
+function spriteCanvas(w,h){if(BITMAPS)return new OffscreenCanvas(w,h);const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
+const bake=c=>BITMAPS?c.transferToImageBitmap():c;
 let DPR=1,baseDPR=1,VW=0,VH=0,Z=1;
 // Resolution steps, as a share of baseDPR. Adaptive scaling (see trackRes) moves between them;
 // the last good step is remembered for next time.
@@ -1072,12 +1077,11 @@ const TILE=400,tiles=new Map();let tileS=0;
 function groundTile(i,j,S){
   const k=i+','+j;let t=tiles.get(k);
   if(t){tiles.delete(k);tiles.set(k,t);return t;} // most recently used goes last
-  const x0=Math.round(i*TILE*S),y0=Math.round(j*TILE*S),c=document.createElement('canvas');
-  c.width=Math.round((i+1)*TILE*S)-x0;c.height=Math.round((j+1)*TILE*S)-y0;
+  const x0=Math.round(i*TILE*S),y0=Math.round(j*TILE*S),c=spriteCanvas(Math.round((i+1)*TILE*S)-x0,Math.round((j+1)*TILE*S)-y0);
   const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);
   const L=i*TILE,Tp=j*TILE,m=8; // a margin catches outlines that bleed over the tile edge
   drawGround(L-m,Tp-m,L+TILE+m,Tp+TILE+m);
-  ctx=main;t={c,x:x0,y:y0};tiles.set(k,t);return t;
+  ctx=main;t={c:bake(c),x:x0,y:y0};tiles.set(k,t);return t;
 }
 function drawGroundCached(S,Lpx,Tpx,L,Tp,R2,B){
   if(S!==tileS){tiles.clear();tileS=S;}
@@ -1112,9 +1116,9 @@ function drawPersonBody(p,x,y,sitting,holding){
   const k=p.lookKey+'|'+(sitting?'s':f)+(holding?'h':'');
   let c=personSprites.get(k);
   if(c){personSprites.delete(k);personSprites.set(k,c);}
-  else{c=document.createElement('canvas');c.width=c.height=Math.ceil(2*PR*S);
+  else{const n=Math.ceil(2*PR*S);c=spriteCanvas(n,n);
     const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,PR*S,PR*S);
-    personShape(p,sitting?0:Math.sin(f/WALK_FRAMES*TAU)*2.4,sitting,holding);ctx=main;
+    personShape(p,sitting?0:Math.sin(f/WALK_FRAMES*TAU)*2.4,sitting,holding);ctx=main;c=bake(c);
     personSprites.set(k,c);if(personSprites.size>600)personSprites.delete(personSprites.keys().next().value);}
   const d=c.width/S;
   ctx.save();ctx.translate(x,y);ctx.rotate(p.face);ctx.drawImage(c,-PR,-PR,d,d);ctx.restore();
@@ -1158,10 +1162,10 @@ const foodSprites=new Map();let foodS=0;
 function heldFood(type,x,y,s,rich){
   const S=DPR*Z,m=13*s,k=type+'|'+s;if(S!==foodS){foodSprites.clear();foodS=S;}
   let c=foodSprites.get(k);
-  if(!c){c=document.createElement('canvas');c.width=c.height=Math.ceil(2*m*S);
+  if(!c){const n=Math.ceil(2*m*S);c=spriteCanvas(n,n);
     const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,m*S,m*S);
     ctx.fillStyle='rgba(20,22,30,.3)';ctx.beginPath();ctx.ellipse(1.5,2.5,7*s,5*s,0,0,TAU);ctx.fill();
-    drawFood(type,0,0,s);ctx=main;foodSprites.set(k,c);}
+    drawFood(type,0,0,s);ctx=main;c=bake(c);foodSprites.set(k,c);}
   const t=ctx.getTransform();ctx.save();ctx.setTransform(1,0,0,1,0,0);
   ctx.drawImage(c,Math.round(t.a*(x-m)+t.e),Math.round(t.d*(y-m)+t.f));ctx.restore();
   if(rich){const a=(Math.sin(T*5)+1)/2,r=2+a*2.2;ctx.save();ctx.translate(x+7,y-7);ctx.rotate(T*1.5);ctx.fillStyle='#ffd23f';ctx.strokeStyle=INK;ctx.lineWidth=0.8;
@@ -1174,10 +1178,9 @@ if(document.fonts)document.fonts.addEventListener('loadingdone',()=>cartSprites.
 function drawCart(c,i){
   const S=DPR*Z,has=hasFood(i),k=[c.x,c.y,c.col,c.cfood,has].join();if(S!==cartS||cartSprites.size>40){cartSprites.clear();cartS=S;}
   let e=cartSprites.get(k);
-  if(!e){const x0=Math.floor((c.x-24)*S),y0=Math.floor((c.y-19)*S),cv2=document.createElement('canvas');
-    cv2.width=Math.ceil((c.x+28)*S)-x0;cv2.height=Math.ceil((c.y+23)*S)-y0;
+  if(!e){const x0=Math.floor((c.x-24)*S),y0=Math.floor((c.y-19)*S),cv2=spriteCanvas(Math.ceil((c.x+28)*S)-x0,Math.ceil((c.y+23)*S)-y0);
     const main=ctx;ctx=cv2.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);cartShape(c,has);ctx=main;
-    e={c:cv2,x:x0,y:y0};cartSprites.set(k,e);}
+    e={c:bake(cv2),x:x0,y:y0};cartSprites.set(k,e);}
   const t=ctx.getTransform();ctx.save();ctx.setTransform(1,0,0,1,0,0);
   ctx.drawImage(e.c,Math.round(e.x+t.e),Math.round(e.y+t.f));ctx.restore();
 }
@@ -1206,18 +1209,22 @@ function drawPeople(L,Tp,R2,B){
     if(c.kind==='shoo'&&!al&&!(live&&Math.hypot(o.x-bird.x,o.y-bird.y)<c.range+140))return;
     cone(o.x,o.y,e.rf,c.half,c.range,c.kind==='shoo'?CONE_RGB.shoo:e.kind==='cart'&&!al?CONE_RGB.cart:CONE_RGB.swat,al);
   });
+  dbgMark('cones');
   E.forEach((c,i)=>{if(c.kind!=='cart'||!vis(c.x,c.y,60))return;
     drawCart(c,i);
     const v=GH.guardPos(c,c);if(!c.vendor)c.vendor={skin:c.skin,hair:c.hair,shirt:'#fffaf0',pants:'#3b4a6b',grump:false,walk:0};
     c.vendor.face=c.face;drawPersonBody(c.vendor,v.x,v.y,false,false);
   });
+  dbgMark('carts');
   E.forEach((p,i)=>{if(p.kind==='cart'||!vis(p.x,p.y,30))return;
     const has=hasFood(i);
     drawPersonBody(p,p.x,p.y,p.kind==='sit',has);
     if(has){const fp=GH.foodPos(p,p,p.rf);heldFood(foodOf(i),fp.x,fp.y,0.9,p.grump);}
   });
+  dbgMark('people');
   if(aim>=0&&E[aim])drawAimFood(E[aim]);
   E.forEach((p,i)=>{if(p.angryT>0&&vis(p.x,p.y,40))bubble(p.x,p.y-(p.kind==='cart'?6:18),p.grump?'!!#@%':'HEY!',p.grump||p.kind==='cart');});
+  dbgMark('aim+bubbles');
 }
 const AIM_COL={steal:'#ffd23f',far:'#ffd23f',shoo:'#fffaf0',swat:'#e8483b'};
 // brackets around the food a swoop would grab, colored by how it would go
@@ -1247,8 +1254,7 @@ function treeSprite(t,S,shadow){
   let e=treeSprites.get(t);if(!e){e={};treeSprites.set(t,e);}
   const k=shadow?'s':'c';if(e[k])return e[k];
   const r=t.r,cx=shadow?t.x+7:t.x,cy=shadow?t.y+8:t.y,m=shadow?r+1:r*1.05+2;
-  const x0=Math.floor((cx-m)*S),y0=Math.floor((cy-m)*S),c=document.createElement('canvas');
-  c.width=Math.ceil((cx+m)*S)-x0;c.height=Math.ceil((cy+m)*S)-y0;
+  const x0=Math.floor((cx-m)*S),y0=Math.floor((cy-m)*S),c=spriteCanvas(Math.ceil((cx+m)*S)-x0,Math.ceil((cy+m)*S)-y0);
   const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);
   if(shadow){ctx.fillStyle='rgba(20,22,30,.25)';ctx.beginPath();ctx.arc(t.x+7,t.y+8,r,0,TAU);ctx.fill();}
   else{const lobes=[[0.42,0.2],[-0.3,0.4],[-0.35,-0.35],[0.3,-0.42]];
@@ -1257,7 +1263,7 @@ function treeSprite(t,S,shadow){
     ctx.fillStyle='#4f8f45';ctx.beginPath();for(const l of lobes){ctx.moveTo(t.x+l[0]*r+r*0.62,t.y+l[1]*r);ctx.arc(t.x+l[0]*r,t.y+l[1]*r,r*0.62,0,TAU);}ctx.fill();
     ctx.fillStyle='#62a353';ctx.beginPath();ctx.arc(t.x-r*0.18,t.y-r*0.18,r*0.55,0,TAU);ctx.fill();
     ctx.fillStyle='#7fbf69';ctx.beginPath();ctx.arc(t.x-r*0.32,t.y-r*0.34,r*0.26,0,TAU);ctx.fill();}
-  ctx=main;return e[k]={c,x:x0,y:y0};
+  ctx=main;return e[k]={c:bake(c),x:x0,y:y0};
 }
 function drawTrees(L,Tp,R2,B){
   const S=DPR*Z,Lpx=Math.round(L*S),Tpx=Math.round(Tp*S);if(S!==treeS){treeSprites.clear();treeS=S;}
@@ -1284,10 +1290,9 @@ function gullLayer(lk,collar,flap,folded,part,S){
   else k='3|'+(lk?lk.p+','+lk.h+','+lk.e:'')+'|'+collar;
   let e=gullSprites.get(k);
   if(e){gullSprites.delete(k);gullSprites.set(k,e);return e;}
-  const b=GULL_BOX[part-1],c=document.createElement('canvas');
-  c.width=Math.ceil((b[2]-b[0])*S);c.height=Math.ceil((b[3]-b[1])*S);
+  const b=GULL_BOX[part-1],cw=Math.ceil((b[2]-b[0])*S),ch=Math.ceil((b[3]-b[1])*S),c=spriteCanvas(cw,ch);
   const g=c.getContext('2d');g.setTransform(S,0,0,S,-b[0]*S,-b[1]*S);gullSprite(g,lk,collar,f,folded,part);
-  e={c,x:b[0],y:b[1],w:c.width/S,h:c.height/S};gullSprites.set(k,e);
+  e={c:bake(c),x:b[0],y:b[1],w:cw/S,h:ch/S};gullSprites.set(k,e);
   if(gullSprites.size>300)gullSprites.delete(gullSprites.keys().next().value);
   return e;
 }
@@ -1360,13 +1365,16 @@ function render(){
   // snap the camera to whole device pixels so the cached ground lines up with everything else
   const S=DPR*Z,Lpx=Math.round((cx-vw/2)*S),Tpx=Math.round((cy-vh/2)*S),L=Lpx/S,Tp=Tpx/S;camL=L;camT=Tp;
   const live=mode==='solo'||mode==='play';
-  drawGroundCached(S,Lpx,Tpx,L,Tp,L+vw,Tp+vh);
+  dbgMark();
+  drawGroundCached(S,Lpx,Tpx,L,Tp,L+vw,Tp+vh);dbgMark('ground');
   drawPeople(L,Tp,L+vw,Tp+vh);
   if(live)drawLanding();
-  drawTrees(L,Tp,L+vw,Tp+vh);
+  dbgMark('landing');
+  drawTrees(L,Tp,L+vw,Tp+vh);dbgMark('trees');
   for(const r of remote.values())drawGull({x:r.x,y:r.y,h:r.h,alt:r.alt,flap:r.flap,stun:r.s},r.look,r.col,r.nick);
   drawGull({x:bird.x,y:bird.y,h:bird.h,alt:bird.alt,flap:bird.flap,spin:bird.spin,stun:bird.stunT>0,inv:bird.inv,carry:bird.carry},look,col,null);
-  drawFx();
+  dbgMark('gulls');
+  drawFx();dbgMark('fx');
   ctx.setTransform(DPR,0,0,DPR,0,0);
   if(joy.id!==null&&live){
     ctx.fillStyle='rgba(255,250,240,.14)';ctx.strokeStyle='rgba(255,250,240,.55)';ctx.lineWidth=2.5;
@@ -1379,8 +1387,10 @@ function render(){
     ctx.font=`${Math.round(Math.min(VW,VH)*0.22)}px "Titan One",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.lineWidth=10;ctx.strokeStyle=INK;ctx.lineJoin='round';ctx.strokeText(txt,VW/2,VH*0.42);ctx.fillStyle='#ff9f1c';ctx.fillText(txt,VW/2,VH*0.42);ctx.textBaseline='alphabetic';
   }
+  dbgMark('joystick+countdown');
   if(live&&(T>=miniT||T<miniT-1)){miniT=T+0.05;drawMini();} // 20 Hz is plenty for the minimap
-  drawPreviews();
+  dbgMark('minimap');
+  drawPreviews();dbgMark('previews');
 }
 // the gull previews on the menus follow whatever the wardrobe says
 const wardPrev=$('wardPrev'),titlePrev=$('titlePrev'),lobbyPrev=$('lobbyPrev');
@@ -1428,7 +1438,12 @@ function trackRes(ms,iv){
 // ================= debug overlay (?debug in the address) =================
 // Shows what the browser and the game are doing, for tracking down a slow device.
 const DEBUG=(()=>{try{return new URLSearchParams(location.search).has('debug');}catch(e){return false;}})();
-const dbg=DEBUG?{el:null,raf:[],drawn:[],work:[],log:[],lastRaf:0,lastDrawn:0,shownAt:0,gpu:gpuName()}:null;
+const dbg=DEBUG?{el:null,raf:[],drawn:[],work:[],log:[],sec:{},lastRaf:0,lastDrawn:0,shownAt:0,gpu:gpuName()}:null;
+// update() and render() mark the end of each part of a frame. Parts are shown as a mean per frame
+// rather than a median, since some browsers round timers to whole milliseconds.
+let dbgMarkAt=0;
+function dbgMark(name){if(!dbg)return;const t=performance.now();if(name)dbgPush(dbg.sec[name]||(dbg.sec[name]=[]),t-dbgMarkAt);dbgMarkAt=t;}
+const dbgMean=a=>a.reduce((s,x)=>s+x,0)/(a.length||1);
 function gpuName(){try{const g=document.createElement('canvas').getContext('webgl');if(!g)return'no WebGL';
   const e=g.getExtension('WEBGL_debug_renderer_info'),n=g.getParameter(e?e.UNMASKED_RENDERER_WEBGL:g.RENDERER);
   const l=g.getExtension('WEBGL_lose_context');if(l)l.loseContext();return String(n);}catch(e){return'?';}}
@@ -1449,7 +1464,9 @@ function dbgRaf(ts){
     `drawn    ${dm?Math.round(1000/dm):0} fps · median ${dm.toFixed(1)} ms · p95 ${dbgPct(dbg.drawn,0.95).toFixed(1)} ms`,
     `target   ${Math.round(1000/frameInterval())} fps${fps.probing?' (trying)':''} · play range ${Math.round(1000/(kMax()*fps.ref))}–${Math.round(1000/(kMin()*fps.ref))}${t<fps.probeAt?` · next try faster in ${Math.ceil((fps.probeAt-t)/1000)}s`:''}`,
     `mode     ${mode} · battery saver ${saver?'on':'off'}`,
-    `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms per drawn frame`,
+    `JS work  ${dbgPct(dbg.work,0.5).toFixed(1)} ms · p95 ${dbgPct(dbg.work,0.95).toFixed(1)} ms · mean ${dbgMean(dbg.work).toFixed(1)} ms per drawn frame`,
+    `parts    ${Object.entries(dbg.sec).map(([k,a])=>[k,dbgMean(a)]).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v.toFixed(1)}`).join(' · ')}`,
+    `sprites  ${BITMAPS?'ImageBitmap (?bitmaps)':'canvas'}`,
     `res      ${RES_LEVELS[resLevel()]*100}% · ${DPR.toFixed(2)} canvas px per CSS px (device ${(window.devicePixelRatio||1).toFixed(2)}) · ${cv.width}×${cv.height} · zoom ${Z.toFixed(2)}`,
     `adaptive ${res.pending?'judging a step down':'steady'}${t<res.noDownUntil?` · no step down for ${Math.ceil((res.noDownUntil-t)/1000)}s`:''}${t<res.noUpUntil?` · no step up for ${Math.ceil((res.noUpUntil-t)/1000)}s`:''}`,
     `gpu      ${dbg.gpu}`,`browser  ${ua}`,
@@ -1505,7 +1522,7 @@ function frame(ts){
   nextFrameAt=ts-nextFrameAt>iv?ts+iv:nextFrameAt+iv;
   const w0=dbg?performance.now():0;
   const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.05,raw);trackFps(ts-last);trackRes(ts-last,iv);last=ts;
-  if(!paused)update(dt,Math.min(1,raw));
+  dbgMark();if(!paused)update(dt,Math.min(1,raw));dbgMark('update');
   // a frozen scene (solo pause) or a menu card over most of a narrow screen: keep the last city frame
   if(bgDraws<=0&&(paused||shownScreen&&mode!=='solo'&&mode!=='play'&&VW<660)){drawPreviews();return;}
   if(bgDraws>0)bgDraws--;
