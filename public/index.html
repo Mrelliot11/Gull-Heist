@@ -271,10 +271,12 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 <script>
 (()=>{
 // ================= setup =================
-const cv=document.getElementById('game'), ctx=cv.getContext('2d');
+const cv=document.getElementById('game');
+let ctx=cv.getContext('2d'); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
 let DPR=1,VW=0,VH=0,Z=1;
-function resize(){DPR=Math.min(2,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);
+// the canvas is rasterized in full every frame; 1.5x looks the same as 2x with this chunky art
+function resize(){DPR=Math.min(1.5,window.devicePixelRatio||1);VW=innerWidth;VH=innerHeight;cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);
   Z=Math.max(0.8,Math.min(1.35,Math.min(VW,VH)/430));}
 addEventListener('resize',resize);resize();
 
@@ -700,13 +702,14 @@ function onNet(m){
       net.lobby=m;for(const p of m.members||[])names[p.id]={nick:GH.cleanNick(p.nick),col:COLS.includes(p.col)?p.col:'#fffaf0',look:GH.cleanLook(p.look)};
       if(mode==='lobby')renderLobby();if(mode==='title')updateMpBtn();break;
     case 'match':
-      setClock(m.mt,0);
+      // a new match has a new clock: take the server's word until a ping measures the lag
+      net.clk=null;setClock(m.mt,0,true);net.lastPing=0;
       if(mode==='play'&&joinedId===m.id){cur.M.cnt=m.cnt;cur.M.fu=m.fu;cur.M.al=m.al;feathers=m.f;renderFeathers();} // back after a reconnect
       else if(mode==='lobby'||mode==='results')joinMatch(m);
       break;
     case 's':
       if(mode!=='play'||m.id!==joinedId)break;
-      net.snap=m;if(m.sc&&typeof m.sc==='object')cur.M.sc=m.sc;if(!net.clk)setClock(m.mt,0);break;
+      net.snap=m;if(m.sc&&typeof m.sc==='object')cur.M.sc=m.sc;if(!net.clk)setClock(m.mt,0,true);addSnap(m);break;
     case 'ev':
       if(mode==='play'&&cur.M.ents[m.i]){const M=cur.M,e=M.ents[m.i];M.cnt[m.i]=m.cnt;M.fu[m.i]=m.fu;M.al[m.i]=m.al;
         if(m.by!==net.me&&e.angryT<=0){e.angryT=1.8;if(m.k==='steal')burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a'],8,60);}}
@@ -721,16 +724,18 @@ function onNet(m){
       if(mode==='lobby'&&typeof m.m==='string')$('lobbyStatus').textContent=m.m;break;
   }
 }
-// match clock: server time plus half the round trip; keep the best (lowest-lag) sample
-function setClock(mt,rtt){const t=now(),c=net.clk;
-  if(!c||rtt<=c.rtt*1.5+0.01||t-c.at>10000)net.clk={base:mt+rtt/2,at:t,rtt};}
+// match clock: server time plus half the round trip. Keep the lowest-lag sample; an old one
+// slowly loses its claim so a lasting change in lag is still picked up. est: no round trip measured yet.
+function setClock(mt,rtt,est){const t=now(),c=net.clk;
+  if(!c||c.est||rtt<=c.rtt*1.5+0.01+(t-c.at)/1e5)net.clk={base:mt+rtt/2,at:t,rtt,est:!!est};}
 function netMt(){const c=net.clk;return c?c.base+(now()-c.at)/1000:null;}
 function netTick(){
   if(!net.conn)return;const t=now();
   const st=mode==='play'?'play':mode==='lobby'?'lobby':mode==='results'?'results':'menu';
   if(st!==net.sentSt){net.sentSt=st;netSend({t:'st',st});}
   const prof=nick+'|'+col+'|'+look.p+look.h+look.e;if(prof!==net.sentProf&&t-net.lastProf>400){net.sentProf=prof;net.lastProf=t;netSend({t:'prof',nick,col,look});}
-  if(mode==='play'&&t-net.lastPos>50){net.lastPos=t;netSend({t:'pos',x:Math.round(bird.x*10)/10,y:Math.round(bird.y*10)/10,h:Math.round(wrap(bird.h)*100)/100,a:Math.round(bird.alt*100)/100});}
+  if(mode==='play'&&t-net.lastPos>50){net.lastPos=t;const nt=netMt();
+    netSend({t:'pos',x:Math.round(bird.x*10)/10,y:Math.round(bird.y*10)/10,h:Math.round(wrap(bird.h)*100)/100,a:Math.round(bird.alt*100)/100,mt:nt==null?undefined:Math.round(nt*1000)/1000});}
   if(mode==='play'&&t-net.lastPing>2000){net.lastPing=t;netSend({t:'ping',c:t});}
 }
 function updateMpBtn(){
@@ -902,18 +907,38 @@ function updateBird(dt,g){
     const u=l?Math.max(0,Math.min(1,((fp.x-b.x)*vx+(fp.y-b.y)*vy)/l)):0;
     aimK=GH.judgeSteal(cur.M,pl,aim,b.x+vx*u,b.y+vy*u,cur.mt,g,{slack:6}).k;}
 }
-function updateRemote(dt){
-  if(mode!=='play'||!net.snap){remote.clear();return;}
+// Other gulls: each snapshot row is a sample stamped with when its sender took it. They are
+// drawn a little in the past, between the two samples around that moment, so they glide at
+// the speed they really flew however unevenly the samples arrive.
+const REMOTE_DELAY=0.15;
+function addSnap(m){
   const seen=new Set();
-  for(const q of net.snap.p||[]){
+  for(const q of m.p||[]){
     if(!Array.isArray(q)||q[0]===net.me||typeof q[1]!=='number'||typeof q[2]!=='number')continue;
     const id=q[0];seen.add(id);let r=remote.get(id);
-    if(!r){r={x:q[1],y:q[2],h:+q[3]||0,alt:1,flap:rnd()*6,s:0};remote.set(id,r);}
-    const ta=Math.max(0,Math.min(1,+q[4]||0));r.s=q[5]?1:0;
-    const k=Math.min(1,dt*10);r.x+=(q[1]-r.x)*k;r.y+=(q[2]-r.y)*k;r.h=turnTo(r.h,+q[3]||0,dt*12);r.alt+=(ta-r.alt)*k;r.flap+=dt*(r.alt<0.5?5:8);
-    const n=names[id]||{};r.nick=n.nick||'Gull';r.col=n.col||'#fffaf0';r.look=n.look||GH.cleanLook(null);
+    const smp={t:typeof q[6]==='number'?q[6]:m.mt,x:q[1],y:q[2],h:+q[3]||0,a:Math.max(0,Math.min(1,+q[4]||0)),s:q[5]?1:0};
+    if(!r){r={x:smp.x,y:smp.y,h:smp.h,alt:smp.a,flap:rnd()*6,s:0,buf:[]};remote.set(id,r);}
+    const b=r.buf;let l=b[b.length-1];
+    if(l&&smp.t<l.t-0.25){b.length=0;l=null;} // their clock jumped back: start over
+    if(!l||smp.t>l.t){b.push(smp);if(b.length>10)b.shift();}
+    else l.s=smp.s; // no new position, but grounded can still change
   }
   for(const k of remote.keys())if(!seen.has(k))remote.delete(k);
+}
+function updateRemote(dt){
+  if(mode!=='play'||!net.snap){remote.clear();return;}
+  const nt=netMt(),rt=(nt==null?cur.mt:nt)-REMOTE_DELAY;
+  for(const [id,r] of remote){
+    const b=r.buf,n=b.length,last=b[n-1];if(!n)continue;
+    if(rt>=last.t){ // no newer sample yet: coast on briefly, then hold
+      const p=n>1?b[n-2]:null,e=p?Math.min(rt-last.t,0.1)/(last.t-p.t):0;
+      r.x=last.x+(p?(last.x-p.x)*e:0);r.y=last.y+(p?(last.y-p.y)*e:0);r.h=last.h;r.alt=last.a;r.s=last.s;
+    }else if(rt<=b[0].t){r.x=b[0].x;r.y=b[0].y;r.h=b[0].h;r.alt=b[0].a;r.s=b[0].s;}
+    else{let i=n-1;while(b[i-1].t>rt)i--;const p=b[i-1],q=b[i],u=(rt-p.t)/(q.t-p.t);
+      r.x=p.x+(q.x-p.x)*u;r.y=p.y+(q.y-p.y)*u;r.h=GH.lerpAng(p.h,q.h,u);r.alt=p.a+(q.a-p.a)*u;r.s=p.s;}
+    r.flap+=dt*(r.alt<0.5?5:8);
+    const nm=names[id]||{};r.nick=nm.nick||'Gull';r.col=nm.col||'#fffaf0';r.look=nm.look||GH.cleanLook(null);
+  }
 }
 let boardT=0;
 function renderBoard(){
@@ -922,10 +947,12 @@ function renderBoard(){
     const nm=document.createElement('span');nm.className='nm';nm.textContent=r.nick;const s=document.createElement('span');s.textContent=r.score;li.append(d,nm,s);boardEl.appendChild(li);});
 }
 
-function update(dt){
+// dt is capped for physics; realDt is the actual time since last frame, so the match
+// clock keeps up with the server even when frames are slow
+function update(dt,realDt){
   T+=dt;
   if(mode==='play'){ // follow the server's clock, easing out small differences
-    cur.mt+=dt;const target=netMt();
+    cur.mt+=realDt;const target=netMt();
     if(target!=null){const err=target-cur.mt;if(Math.abs(err)>0.5)cur.mt=target;else cur.mt+=err*Math.min(1,dt*2);}
     resolvePending();
   }else cur.mt+=dt;
@@ -945,7 +972,7 @@ function update(dt){
     if(mode==='solo'&&cur.mt>=dur)endSolo("Time's up!");
     // the server normally ends the match; this only covers a lost connection
     if(mode==='play'&&cur.mt>=dur+5)showResults(rankRows().map(r=>[r.id,r.nick,r.col,r.score]));
-    const cdFrac=bird.swoopT>=0?1:(bird.cd>0?bird.cd/0.2:0);swoopBtn.style.setProperty('--cd',(cdFrac*360)+'deg');
+    const cdDeg=Math.round((bird.swoopT>=0?1:(bird.cd>0?bird.cd/0.2:0))*360);if(cdDeg!==lastCd){lastCd=cdDeg;swoopBtn.style.setProperty('--cd',cdDeg+'deg');}
     if(hintTimer>0){hintTimer-=dt;if(hintTimer<=0.5)hintEl.style.opacity=Math.max(0,hintTimer/0.5);if(hintTimer<=0)hintEl.hidden=true;}
     if(mp){boardT-=dt;if(boardT<=0){boardT=0.25;renderBoard();}}
   }
@@ -994,8 +1021,6 @@ function drawGround(L,Tp,R2,B){
       for(let s=0;s<=iw;s+=26){ctx.moveTo(ix+s,iy);ctx.lineTo(ix+s,iy+iw);ctx.moveTo(ix,iy+s);ctx.lineTo(ix+iw,iy+s);}ctx.stroke();
       ctx.fillStyle='#b9ae9a';ctx.beginPath();ctx.arc(FX,FY,52,0,TAU);ctx.fill();ctx.strokeStyle='#1d2330';ctx.lineWidth=2;ctx.stroke();
       ctx.fillStyle='#6cc3d5';ctx.beginPath();ctx.arc(FX,FY,42,0,TAU);ctx.fill();
-      ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;const rp=(T*18)%20;
-      for(let r=10+rp;r<42;r+=20){ctx.beginPath();ctx.arc(FX,FY,r,0,TAU);ctx.stroke();}
       ctx.fillStyle='#fffaf0';ctx.beginPath();ctx.arc(FX,FY,7,0,TAU);ctx.fill();ctx.strokeStyle='#1d2330';ctx.stroke();
     }
   }
@@ -1018,12 +1043,35 @@ function drawGround(L,Tp,R2,B){
     }
   }
 }
+// The city never changes, so it is drawn once into tiles at the current pixel scale and
+// copied each frame. Tiles sit on whole device pixels so neighbours meet without seams.
+const TILE=400,tiles=new Map();let tileS=0;
+function groundTile(i,j,S){
+  const k=i+','+j;let t=tiles.get(k);
+  if(t){tiles.delete(k);tiles.set(k,t);return t;} // most recently used goes last
+  const x0=Math.round(i*TILE*S),y0=Math.round(j*TILE*S),c=document.createElement('canvas');
+  c.width=Math.round((i+1)*TILE*S)-x0;c.height=Math.round((j+1)*TILE*S)-y0;
+  const main=ctx;ctx=c.getContext('2d');ctx.setTransform(S,0,0,S,-x0,-y0);
+  const L=i*TILE,Tp=j*TILE,m=8; // a margin catches outlines that bleed over the tile edge
+  drawGround(L-m,Tp-m,L+TILE+m,Tp+TILE+m);
+  ctx=main;t={c,x:x0,y:y0};tiles.set(k,t);return t;
+}
+function drawGroundCached(S,Lpx,Tpx,L,Tp,R2,B){
+  if(S!==tileS){tiles.clear();tileS=S;}
+  const i0=Math.floor(L/TILE),i1=Math.floor(R2/TILE),j0=Math.floor(Tp/TILE),j1=Math.floor(B/TILE);
+  ctx.setTransform(1,0,0,1,0,0);
+  for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const t=groundTile(i,j,S);ctx.drawImage(t.c,t.x-Lpx,t.y-Tpx);}
+  for(const keep=(i1-i0+1)*(j1-j0+1)+8;tiles.size>keep;)tiles.delete(tiles.keys().next().value);
+  ctx.setTransform(S,0,0,S,-Lpx,-Tpx);
+  // the fountain's ripples are the one moving part
+  if(FX+42>L&&FX-42<R2&&FY+42>Tp&&FY-42<B){ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;const rp=(T*18)%20;
+    for(let r=10+rp;r<42;r+=20){ctx.beginPath();ctx.arc(FX,FY,r,0,TAU);ctx.stroke();}}
+}
 const PANTS=['#3b4a6b','#5a4a3a','#2f3542','#6b7a8f','#4a5a3f'];
 const CONE_RGB={shoo:'255,250,240',cart:'255,210,63',swat:'232,72,59'};
 // an awareness cone: soft fill, crisp edge. alert cones get a marching outer rim.
 function cone(x,y,a,half,r,rgb,alert){
-  const g=ctx.createRadialGradient(x,y,6,x,y,r);g.addColorStop(0,`rgba(${rgb},.28)`);g.addColorStop(1,`rgba(${rgb},.12)`);
-  ctx.beginPath();ctx.moveTo(x,y);ctx.arc(x,y,r,a-half,a+half);ctx.closePath();ctx.fillStyle=g;ctx.fill();
+  ctx.beginPath();ctx.moveTo(x,y);ctx.arc(x,y,r,a-half,a+half);ctx.closePath();ctx.fillStyle=`rgba(${rgb},.2)`;ctx.fill();
   ctx.lineJoin='round';ctx.strokeStyle=`rgba(${rgb},.55)`;ctx.lineWidth=1.5;ctx.stroke();
   ctx.beginPath();ctx.arc(x,y,r,a-half,a+half);ctx.strokeStyle='rgba(29,35,48,.35)';ctx.lineWidth=5;ctx.stroke();
   ctx.strokeStyle=`rgba(${rgb},.95)`;ctx.lineWidth=2.5;ctx.stroke();
@@ -1206,15 +1254,16 @@ function drawMini(){
   mctx.beginPath();mctx.moveTo(9,0);mctx.lineTo(-6,-7);mctx.lineTo(-3,0);mctx.lineTo(-6,7);mctx.closePath();
   mctx.strokeStyle='#fffaf0';mctx.lineWidth=5;mctx.stroke();mctx.fillStyle=col;mctx.fill();mctx.strokeStyle=INK;mctx.lineWidth=2;mctx.stroke();mctx.restore();
 }
+let miniT=0,lastCd=-1;
 function render(){
   const vw=VW/Z,vh=VH/Z;
   let cx=Math.max(vw/2-60,Math.min(W-vw/2+60,camX)),cy=Math.max(vh/2-60,Math.min(W-vh/2+60,camY));
   if(vw>W+120)cx=W/2;if(vh>W+120)cy=W/2;
   if(shakeT>0){cx+=(rnd()-0.5)*14*shakeT;cy+=(rnd()-0.5)*14*shakeT;}
-  const L=cx-vw/2,Tp=cy-vh/2;camL=L;camT=Tp;
+  // snap the camera to whole device pixels so the cached ground lines up with everything else
+  const S=DPR*Z,Lpx=Math.round((cx-vw/2)*S),Tpx=Math.round((cy-vh/2)*S),L=Lpx/S,Tp=Tpx/S;camL=L;camT=Tp;
   const live=mode==='solo'||mode==='play';
-  ctx.setTransform(DPR*Z,0,0,DPR*Z,-L*DPR*Z,-Tp*DPR*Z);
-  drawGround(L,Tp,L+vw,Tp+vh);
+  drawGroundCached(S,Lpx,Tpx,L,Tp,L+vw,Tp+vh);
   drawPeople(L,Tp,L+vw,Tp+vh);
   if(live)drawLanding();
   drawTrees(L,Tp,L+vw,Tp+vh);
@@ -1233,7 +1282,7 @@ function render(){
     ctx.font=`${Math.round(Math.min(VW,VH)*0.22)}px "Titan One",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.lineWidth=10;ctx.strokeStyle=INK;ctx.lineJoin='round';ctx.strokeText(txt,VW/2,VH*0.42);ctx.fillStyle='#ff9f1c';ctx.fillText(txt,VW/2,VH*0.42);ctx.textBaseline='alphabetic';
   }
-  if(live)drawMini();
+  if(live&&(T>=miniT||T<miniT-1)){miniT=T+0.05;drawMini();} // 20 Hz is plenty for the minimap
   drawPreviews();
 }
 // the gull previews on the menus follow whatever the wardrobe says
@@ -1254,8 +1303,8 @@ function drawPreviews(){
 
 // ================= loop =================
 function frame(ts){
-  const dt=Math.min(0.033,Math.max(0,(ts-last)/1000));last=ts;
-  if(!paused)update(dt);
+  const raw=Math.max(0,(ts-last)/1000),dt=Math.min(0.033,raw);last=ts;
+  if(!paused)update(dt,Math.min(1,raw));
   render();
   requestAnimationFrame(frame);
 }
