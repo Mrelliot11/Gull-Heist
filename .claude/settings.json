@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./android/app/build/**)",
+      "Read(./android/build/**)",
+      "Read(./android/.gradle/**)",
+      "Read(./android/app/src/main/assets/public/**)",
+      "Read(./**/package-lock.json)",
+      "Read(./**/*.min.js)",
+      "Read(./**/*.map)"
+    ]
+  }
+}
