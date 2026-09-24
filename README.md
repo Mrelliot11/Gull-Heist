@@ -11,6 +11,7 @@ public/shared.js   city, people and steal rules, used by both the page and the s
 public/og.png      link-preview image (Discord, iMessage, etc.)
 Dockerfile         container build, if your host uses one
 Caddyfile.example  HTTPS reverse proxy config for a VPS
+android/           Android app (Capacitor) that bundles public/
 ```
 
 ## Run it locally
@@ -137,6 +138,24 @@ DNS changes can take a few minutes to a few hours. Once the site loads over `htt
 - The server checks steals against where it last saw your gull and how fast gulls can fly, so teleporting doesn't work.
 - Power-up and Golden Chip grabs are judged at the server's own position for your gull, not the one the page claims.
 - Opening `public/index.html` straight from disk works for solo play only.
+
+## Android app
+
+The Android app bundles `public/` inside the APK, so solo play works offline. For multiplayer, enter the server's address in the **Multiplayer server** box on the title screen (for example `yourgame.gg`, or `192.168.1.20:8080` for a server on your Wi-Fi). The app remembers it. **Copy link** gives a web link friends can open in a browser.
+
+The server accepts the app's origins (`https://localhost`, `capacitor://localhost`, `http://localhost`) by default.
+
+To build a debug APK you need the Android SDK and JDK 21 (Android Studio's bundled `jbr` works):
+
+```bash
+npm install
+# point JAVA_HOME at JDK 21, e.g. "C:\Program Files\Android\Android Studio\jbr"
+npm run android:build        # Windows
+npm run android:build:unix   # macOS / Linux
+# APK: android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Run `npm run cap:sync` after changing anything in `public/`, or open `android/` in Android Studio. The app allows plain `ws://` connections so it can reach a server on your Wi-Fi; turn that off (`usesCleartextTraffic` in the manifest, `allowMixedContent` in `capacitor.config.json`) before a store release.
 
 ## Tests
 
