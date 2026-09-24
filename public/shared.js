@@ -211,7 +211,7 @@ function attemptSteal(M,pl,i,x,y,t,gulls,o){
   return r;
 }
 // Rush: seconds a steal adds to the clock
-function rushBonus(r){return(r.cart?4:2)+(r.combo>=3?1:0);}
+function rushBonus(r){return(r.cart?6:3)+(r.combo>=3?1:0);}
 
 // ================= power-ups =================
 // Power-ups hover over the streets on a timetable fixed by the match seed, so the page and the

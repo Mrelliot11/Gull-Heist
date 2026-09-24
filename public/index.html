@@ -40,6 +40,9 @@ canvas#game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-ac
 .combo{background:var(--beak);font-size:16px;padding:2px 9px 1px;transform:rotate(-4deg)}
 .timer.low{background:var(--red);color:#fff}
 .timer.low small{color:#ffe1dc}
+.timer.bonus{background:#46a36b;color:#fff;transform:scale(1.12)}
+.timer.bonus small{color:#dff5e6}
+.timer{transition:transform .15s}
 .feathers{display:flex;gap:2px;background:var(--paper);border:3px solid var(--ink);border-radius:14px;box-shadow:3px 3px 0 var(--ink);padding:4px 6px}
 .feathers svg{width:22px;height:22px;transition:opacity .2s,transform .2s}
 .feathers svg.lost{opacity:.18;transform:rotate(30deg) scale(.8)}
@@ -148,7 +151,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 .trophies li span.cup{font-family:"Titan One",sans-serif;font-size:18px;text-align:center;opacity:.25}
 .trophies li.got{background:#fff6dc}
 .trophies li.got span.cup{opacity:1;color:#e0a400}
-@media (prefers-reduced-motion: reduce){ .feathers svg{transition:none} }
+@media (prefers-reduced-motion: reduce){ .feathers svg{transition:none} .timer{transition:none} .timer.bonus{transform:none} }
 </style>
 </head>
 <body>
@@ -185,8 +188,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
       <li><span class="rk a">1</span><span id="ruleMove"><b>Drag anywhere</b> to fly. The ring ahead of you marks where a swoop lands.</span></li>
       <li><span class="rk b">2</span><span id="ruleSwoop"><b>Swoop</b> (button or quick tap) onto anyone holding food to snatch it.</span></li>
       <li><span class="rk c">3</span><span><b>Come in from behind.</b> Everyone watches the cone in front of them. Regular folks (white cone) shoo you off. Grumps (red) and cart vendors (yellow) swat you: three swats and you're grounded.</span></li>
-      <li><span class="rk c">!</span><span><b>Robbed people stay alert</b> for a few seconds: their cone widens and they turn to face the nearest gull.</span></li>
       <li><span class="rk d">4</span><span><b>Chain steals</b> within 3 seconds for up to x5 loot.</span></li>
+      <li><span class="rk c">!</span><span><b>Robbed people stay alert</b> for a few seconds: their cone widens and they turn to face the nearest gull.</span></li>
       <li><span class="rk b">★</span><span><b>Fly through power-ups</b>: tailwind, camouflage, big beak, shield feather, double loot and screech.</span></li>
     </ul>
     <div class="field"><label id="modeLabel">Solo mode</label><div class="modes" id="soloModes" role="group" aria-labelledby="modeLabel"></div></div>
@@ -986,7 +989,7 @@ function pendingSum(){let s=0;for(const v of pending.values())if(v.pred.k==='ste
 function myScore(){return mp?((cur.M.sc[net.me]||0)+pendingSum()):(cur.M.sc.me||0);}
 
 // ================= game logic =================
-function addFloat(x,y,txt,col,size){floats.push({x,y,txt,col:col||'#fffaf0',size:size||20,t:0});}
+function addFloat(x,y,txt,col,size){const f={x,y,txt,col:col||'#fffaf0',size:size||20,t:0};floats.push(f);return f;}
 function burst(x,y,cols,n,sp,feather){for(let i=0;i<n;i++){const a=rnd()*TAU,s=(0.4+rnd())*sp;parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,life:0.6+rnd()*0.5,c:pick(cols),r:1.5+rnd()*2.5,feather:!!feather});}}
 function hasFood(i){return GH.hasFoodAt(cur.M,i,cur.mt)&&!(hideFood.get(i)>now());}
 function foodOf(i){return GH.typeFor(cur.M.seed,i,cur.M.ents[i],cur.M.cnt[i]||0);}
@@ -1017,15 +1020,20 @@ function stealFx(e,r){
   combo=r.combo;comboT=GH.COMBO_TIME;
   const key=e.kind==='cart'?'cart':r.type;loot[key]=(loot[key]||0)+1;
   bird.carry=r.type;bird.carryT=1.1;
-  addFloat(e.x,e.y-24,'+'+r.pts,combo>1?'#ffd23f':'#fffaf0',combo>1?24:20);
+  const fl=addFloat(e.x,e.y-24,'+'+r.pts,combo>1?'#ffd23f':'#fffaf0',combo>1?24:20);
   if(combo>1){comboEl.hidden=false;comboEl.textContent='x'+combo;addFloat(e.x,e.y-48,'COMBO x'+combo,'#ff9f1c',15);announce(COMBO_WORDS[combo],combo>=5?'#ff8fb1':'#ffd23f');}
   if(e.grump)addFloat(e.x,e.y+26,'grump tax ×2','#ff8fb1',13);
   if(GH.fxOn(mp?netPl:soloPl,'dbl',cur.mt))addFloat(e.x+30,e.y-8,'×2','#ffd23f',16);
-  if(r.bonus){addFloat(bird.x,bird.y-60,'+'+r.bonus+'s','#8fd3e8',20);sfx.tick();}
+  if(r.bonus){addFloat(bird.x,bird.y-60,'+'+r.bonus+'s','#8fd3e8',20);sfx.tick();timeBonus(r.bonus);}
   burst(e.x,e.y,['#ffd23f','#e7b36a','#c98a3a','#ff8fb1'],12+combo*3,70+combo*8);
   sfx.steal(combo);e.angryT=1.8;shake(e.kind==='cart'?0.22:0.08+combo*0.02);hitStop=e.kind==='cart'?0.08:0.035;
   stats.steals++;if(e.kind==='cart')stats.carts++;if(e.grump)stats.grumps++;stats.combo=Math.max(stats.combo,combo);
+  return fl;
 }
+// Rush: flash the clock green with how much time a steal bought
+let bonusTimer=0;
+function timeBonus(n){const lb=timerPill.querySelector('small');timerPill.classList.add('bonus');lb.textContent='+'+n+'s';
+  clearTimeout(bonusTimer);bonusTimer=setTimeout(()=>{timerPill.classList.remove('bonus');lb.textContent='Time';},900);}
 const COMBO_WORDS=['','','Nice!','Sweet!','Gulltastic!','UNSTOPPABLE!'];
 function unsteal(r,e){const key=e.kind==='cart'?'cart':r.type;if(loot[key]){loot[key]--;if(!loot[key])delete loot[key];}bird.carry=null;
   stats.steals=Math.max(0,stats.steals-1);if(e.kind==='cart')stats.carts=Math.max(0,stats.carts-1);if(e.grump)stats.grumps=Math.max(0,stats.grumps-1);}
@@ -1045,9 +1053,9 @@ function tryGrab(i){
   if(r.k!=='steal'&&r.k!=='swat'&&r.k!=='shoo'&&r.k!=='block')return;
   const seq=++mySeq;
   netSend({t:'steal',seq,i,x:Math.round(bird.x*10)/10,y:Math.round(bird.y*10)/10,mt:Math.round(t*1000)/1000});
-  pending.set(seq,{i,pred:r,t:now()});
+  const p={i,pred:r,t:now()};pending.set(seq,p);
   const src=e.kind==='cart'?{x:e.x,y:e.y+20}:e;
-  if(r.k==='steal'){stealFx(e,r);hideFood.set(i,now()+1500);}
+  if(r.k==='steal'){p.fl=stealFx(e,r);hideFood.set(i,now()+1500);}
   else if(r.k==='shoo')shoo(src);
   else if(r.k==='block')block(src);
   else swat(src);
@@ -1060,8 +1068,11 @@ function onRes(m){
   const t=cur.mt;
   if(m.k==='steal'){netPl.comboN=m.combo;netPl.comboUntil=t+GH.COMBO_TIME;cur.M.sc[net.me]=(cur.M.sc[net.me]||0)+(m.pts|0);
     if(p&&p.pred.k!=='steal'){const e=cur.M.ents[p.i];stealFx(e,{type:m.type,combo:m.combo,pts:m.pts});}}
-  else if(p&&p.pred.k==='steal'){const e=cur.M.ents[p.i];unsteal(p.pred,e);hideFood.delete(p.i);
-    if(m.k==='swat')swat(e);else if(m.k==='shoo')shoo(e);else if(m.k==='block')block(e);else{addFloat(bird.x,bird.y-40,'Beaten to it!','#e8483b',16);sfx.miss();}}
+  else if(p&&p.pred.k==='steal'){const e=cur.M.ents[p.i];unsteal(p.pred,e);
+    const k=floats.indexOf(p.fl);if(k>=0)floats.splice(k,1); // take back the points it showed
+    // gone: another gull got there first, so the food stays gone for us too
+    if(m.k!=='gone')hideFood.delete(p.i);
+    if(m.k==='swat')swat(e);else if(m.k==='shoo')shoo(e);else if(m.k==='block')block(e);}
   else if(p&&p.pred.k==='block'&&m.k==='swat')swat(cur.M.ents[p.i]); // the shield was already gone
   if(m.k==='swat'){netPl.invUntil=t+GH.INV_TIME;netPl.comboN=0;netPl.comboUntil=0;}
   if(m.k==='block'){netPl.shield=0;netPl.invUntil=t+GH.INV_TIME;}
