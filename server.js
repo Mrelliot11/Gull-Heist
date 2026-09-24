@@ -19,6 +19,8 @@ const MAX_CONN_PER_IP = Number(process.env.MAX_CONN_PER_IP) || 8;
 const TRUST_PROXY = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
 const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean));
 if (PUBLIC_URL) ALLOWED_ORIGINS.add(new URL(PUBLIC_URL).origin);
+// the Android app (Capacitor) serves the page from these local origins and connects from there
+for (const o of ['https://localhost', 'capacitor://localhost', 'http://localhost']) ALLOWED_ORIGINS.add(o);
 const RESUME_GRACE_MS = 30000;
 const TICK_MS = 1000 / 15;
 const PUB = path.join(__dirname, 'public');
@@ -118,7 +120,8 @@ function originAllowed(req) {
   if (!origin) return true; // not a browser; browsers always send Origin on WebSocket upgrades
   let o;
   try { o = new URL(origin); } catch { return false; }
-  if (ALLOWED_ORIGINS.has(o.origin)) return true;
+  // raw string too: URL gives a non-web scheme like capacitor:// the origin "null"
+  if (ALLOWED_ORIGINS.has(o.origin) || ALLOWED_ORIGINS.has(origin)) return true;
   return !!req.headers.host && o.host === req.headers.host;
 }
 const connsPerIp = new Map();
