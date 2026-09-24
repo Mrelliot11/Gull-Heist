@@ -80,6 +80,18 @@ test('WebSocket upgrade from a foreign Origin is refused with 403', async () => 
   await assert.rejects(c.opened, s => s === 403);
 });
 
+test('WebSocket upgrades from the Android app origins are allowed', async () => {
+  for (const origin of ['https://localhost', 'capacitor://localhost', 'http://localhost']) {
+    const c = client('/ws?room=public', { origin });
+    await c.opened;
+    c.ws.close();
+    await c.closed;
+  }
+  // a different localhost port is still a foreign site
+  const c = client('/ws?room=public', { origin: 'http://localhost:3000' });
+  await assert.rejects(c.opened, s => s === 403);
+});
+
 test('creating a room returns a code like abc-123', async () => {
   const c = await hello('/ws?create=1', 'solo');
   assert.match(c.welcome.room, /^[a-z0-9]{3}-[a-z0-9]{3}$/);

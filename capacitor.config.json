@@ -1,0 +1,11 @@
+{
+  "appId": "com.gullheist.app",
+  "appName": "Gull Heist",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

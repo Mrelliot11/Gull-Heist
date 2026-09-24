@@ -199,6 +199,13 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
     </div>
     <div class="row"><button class="btn ghost wardbtn" id="wardBtn"><canvas id="titlePrev" width="96" height="96" aria-hidden="true"></canvas>Customize your gull</button></div>
     <p class="note" id="mpNote">Checking for other players…</p>
+    <div class="field" id="srvField" hidden>
+      <label for="srvIn">Multiplayer server</label>
+      <div class="row">
+        <input id="srvIn" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" placeholder="yourgame.gg or 192.168.1.20:8080" style="flex:1;min-width:0">
+        <button class="btn ghost" id="srvGo">Save</button>
+      </div>
+    </div>
     <p class="daily" id="daily"></p>
     <div class="row" style="justify-content:space-between">
       <p class="best" id="bestTitle">Best Classic haul: 0</p>
@@ -320,6 +327,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sky);outline-of
 <script>
 (()=>{
 // ================= setup =================
+// inside the Android app (Capacitor injects window.Capacitor before the page loads)
+const APP=(()=>{try{const C=window.Capacitor;return !!(C&&C.isNativePlatform&&C.isNativePlatform());}catch(e){return false;}})();
 const cv=document.getElementById('game');
 let ctx=cv.getContext('2d',{alpha:false}); // swapped briefly while the ground tiles are drawn
 const mini=document.getElementById('mini'), mctx=mini.getContext('2d');
@@ -660,7 +669,7 @@ function setHud(on){hud.hidden=!on;swoopBtn.hidden=!on;if(!on){hintEl.hidden=tru
 $('playBtn').addEventListener('click',startSolo);
 $('againBtn').addEventListener('click',startSolo);
 $('overMenu').addEventListener('click',toTitle);
-$('mpBtn').addEventListener('click',()=>{ensureAudio();toLobby();});
+$('mpBtn').addEventListener('click',()=>{if(!net.conn&&APP&&!srv){$('srvField').hidden=false;$('srvIn').focus();return;}ensureAudio();toLobby();});
 $('lobbyBack').addEventListener('click',toTitle);
 $('resLobby').addEventListener('click',toLobby);
 $('resMenu').addEventListener('click',toTitle);
@@ -677,6 +686,13 @@ $('pauseBtn').addEventListener('click',()=>openMenu(true));
 $('resumeBtn').addEventListener('click',()=>openMenu(false));
 $('quitBtn').addEventListener('click',()=>{openMenu(false);if(mode==='solo')endSolo('Flew home early');else if(mode==='play')toLobby();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='solo')openMenu(true);});
+document.addEventListener('pause',()=>{if(mode==='solo')openMenu(true);}); // the Android app going to the background
+// Android back button (with @capacitor/app installed; without it the app just closes)
+try{const A=APP&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App;
+  if(A&&A.addListener)Promise.resolve(A.addListener('backButton',()=>{
+    if(!$('pauseScreen').hidden)openMenu(false);else if(mode==='solo'||mode==='play')openMenu(true);
+    else if(shownScreen==='wardScreen')$('wardDone').click();else if(shownScreen==='trophyScreen')$('trophyDone').click();
+    else if(mode==='title'){if(A.exitApp)A.exitApp();}else toTitle();})).catch(()=>{});}catch(e){}
 function openMenu(v){
   if(v){$('pauseTitle').textContent=mode==='solo'?'Perched':'Menu';
     $('pauseText').textContent=mode==='solo'?'The fries will wait. Probably.':'The match keeps going while this is open.';
@@ -784,7 +800,8 @@ $('wardBtn').addEventListener('click',openWard);
 $('lobbyWard').addEventListener('click',openWard);
 $('wardDone').addEventListener('click',()=>{if(mode==='lobby'){show('lobbyScreen');renderLobby();}else if(mode==='title')show('titleScreen');else show(wardFrom);});
 $('wardRand').addEventListener('click',()=>{look={p:(rnd()*PLUMES.length)|0,h:(rnd()*HATS.length)|0,e:rnd()<0.5?0:(rnd()*EYES.length)|0};col=pick(COLS);saveLook();renderWard();});
-function roomLink(){const u=new URL(location.href);u.search=net.room==='public'?'':'?room='+encodeURIComponent(net.room);u.hash='';return u.toString();}
+function roomLink(){const u=new URL(srv?srv.http+'/':location.href); // in the app: the server's web page, not https://localhost
+u.search=net.room==='public'?'':'?room='+encodeURIComponent(net.room);u.hash='';return u.toString();}
 $('roomGo').addEventListener('click',()=>{const r=GH.cleanRoom($('roomCode').value);if(r)switchRoom(r,false);});
 $('roomCode').addEventListener('keydown',e=>{if(e.key==='Enter')$('roomGo').click();});
 $('roomNew').addEventListener('click',()=>switchRoom('',true));
@@ -866,13 +883,33 @@ function showResults(rows){
 const remote=new Map();   // id -> interpolated gull
 const names={};           // id -> {nick,col}, kept after players leave
 const net={ws:null,conn:false,me:null,room:GH.cleanRoom((()=>{try{return new URLSearchParams(location.search).get('room')||'';}catch(e){return'';}})())||'public',
-  pub:true,create:false,lobby:null,fails:0,full:false,dead:false,clk:null,snap:null,sentSt:null,sentProf:'',lastPos:0,lastPing:0,lastProf:0};
+  pub:true,create:false,lobby:null,fails:0,err:'',full:false,dead:false,clk:null,snap:null,sentSt:null,sentProf:'',lastPos:0,lastPing:0,lastProf:0};
 const tokStore={get(){try{return JSON.parse(sessionStorage.getItem('gullheist.tok')||'null');}catch(e){return null;}},set(v){try{sessionStorage.setItem('gullheist.tok',JSON.stringify(v));}catch(e){}}};
+// The server: the page's own host on the web. The app's page is local (https://localhost), so there
+// the player enters the server's address. ?server= overrides it anywhere, for testing.
+function normServer(s){s=String(s||'').trim().replace(/\/+$/,'');if(!s)return null;
+  // no scheme: plain http for LAN addresses (IPs, localhost, .local), https for everything else
+  if(!/^[a-z]+:\/\//i.test(s))s=(/^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\]|[^\/:]+\.local)(:\d+)?(\/|$)/i.test(s)?'http://':'https://')+s;
+  let u;try{u=new URL(s);}catch(e){return null;}
+  const sec=u.protocol==='https:'||u.protocol==='wss:';if(!sec&&u.protocol!=='http:'&&u.protocol!=='ws:'||!u.hostname)return null;
+  return{http:(sec?'https://':'http://')+u.host,ws:(sec?'wss://':'ws://')+u.host,host:u.host};}
+const SRV_Q=(()=>{try{return new URLSearchParams(location.search).get('server')||'';}catch(e){return'';}})();
+let srv=normServer(SRV_Q)||(APP?normServer(store.get('gullheist.server','')):null); // null: the page's own host
+function wsBase(){if(srv)return srv.ws;if(APP||!/^https?:$/.test(location.protocol))return null;return(location.protocol==='https:'?'wss:':'ws:')+'//'+location.host;}
+function setServer(v){const s=normServer(v);
+  if(String(v).trim()&&!s){$('mpNote').textContent='That isn\'t a server address. Try something like yourgame.gg or 192.168.1.20:8080.';return;}
+  srv=s;if(APP)store.set('gullheist.server',s?s.http:'');$('srvIn').value=s?s.http:'';
+  if(net.ws){const old=net.ws;net.ws=null;try{old.close();}catch(e){}}
+  Object.assign(net,{conn:false,lobby:null,dead:false,full:false,fails:0,err:''});updateMpBtn();netConnect();}
+$('srvField').hidden=!(APP||SRV_Q);$('srvIn').value=srv?srv.http:'';
+$('srvGo').addEventListener('click',()=>setServer($('srvIn').value));
+$('srvIn').addEventListener('keydown',e=>{if(e.key==='Enter')$('srvGo').click();});
 function netSend(m){if(net.ws&&net.ws.readyState===1)net.ws.send(JSON.stringify(m));}
 function netConnect(){
-  const proto=location.protocol==='https:'?'wss:':'ws:';
+  const base=wsBase();if(!base||net.ws&&net.ws.readyState<2)return; // no server yet, or already connecting
   const q=net.create?'create=1':'room='+encodeURIComponent(net.room);
-  let ws;try{ws=new WebSocket(`${proto}//${location.host}/ws?${q}`);}catch(e){net.fails++;netRetry();return;}
+  let ws;try{ws=new WebSocket(`${base}/ws?${q}`);}
+  catch(e){net.fails++;if(e&&e.name==='SecurityError'){net.err='insecure';updateMpBtn();return;}netRetry();return;} // ws:// from an https page
   net.ws=ws;
   ws.onopen=()=>{const t=tokStore.get();netSend({t:'hello',nick,col,look,tok:!net.create&&t&&t.room===net.room?t.tok:undefined});};
   ws.onmessage=e=>{if(ws!==net.ws)return;let m;try{m=JSON.parse(e.data);}catch(_){return;}if(!m||typeof m!=='object')return;onNet(m);};
@@ -896,7 +933,7 @@ function onNet(m){
       net.me=m.you;net.room=m.room;net.pub=!!m.pub;net.create=false;net.conn=true;net.fails=0;net.full=false;net.clk=null;net.sentSt=null;net.sentProf='';
       tokStore.set({room:m.room,tok:m.tok});
       try{const u=new URL(location.href),q=new URLSearchParams();if(m.room!=='public')q.set('room',m.room);if(DEBUG)q.set('debug','1');
-        if(FORCE_CANVAS)q.set('canvas','1');if(RES_PIN!=null)q.set('res',String(RES_PIN));
+        if(FORCE_CANVAS)q.set('canvas','1');if(SRV_Q)q.set('server',SRV_Q);if(RES_PIN!=null)q.set('res',String(RES_PIN));
         u.search=q.toString();history.replaceState(null,'',u.toString());}catch(e){}
       $('roomCode').value=m.room==='public'?'':m.room;
       updateMpBtn();break;
@@ -953,12 +990,14 @@ function updateMpBtn(){
     n.textContent=others?`${others} other ${others===1?'player is':'players are'} ${where} right now.`:`Nobody else is ${where} yet. Make a private room in the lobby and send friends the link.`;}
   else if(net.dead){b.disabled=true;n.textContent='The game is open in another tab. Reload to play here.';}
   else if(net.full){b.disabled=true;n.textContent='Room “'+net.room+'” is full. Try a different room code in the link.';}
-  else if(location.protocol==='file:'){b.disabled=true;n.textContent='Multiplayer needs the game to be opened from its website, not from a saved file.';}
-  else if(net.fails>=3){b.disabled=true;n.textContent='Can\'t reach the multiplayer server right now. Solo still works.';}
-  else{b.disabled=true;n.textContent='Connecting to other players…';}
+  else if(APP&&!srv){b.disabled=false;n.textContent='Multiplayer needs a server. Enter its address below, like yourgame.gg or 192.168.1.20:8080.';}
+  else if(!wsBase()){b.disabled=true;n.textContent='Multiplayer needs the game to be opened from its website, not from a saved file.';}
+  else if(net.err==='insecure'){b.disabled=true;n.textContent='This app can\'t open an unencrypted connection to '+srv.host+'. Use the server\'s https:// address.';}
+  else if(net.fails>=3){b.disabled=true;n.textContent=srv?'Can\'t reach the multiplayer server at '+srv.host+'. Check the address and your connection. Solo still works.':'Can\'t reach the multiplayer server right now. Solo still works.';}
+  else{b.disabled=true;n.textContent=srv?'Connecting to '+srv.host+'…':'Connecting to other players…';}
 }
 setInterval(()=>{if(mode==='title')updateMpBtn();},1000);
-if(/^https?:$/.test(location.protocol))netConnect();
+netConnect(); // does nothing without a server (a saved file, or the app before one is set)
 updateMpBtn();
 
 function renderLobby(){
