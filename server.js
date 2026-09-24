@@ -173,6 +173,7 @@ function matchMsg(room, p) {
   if (!p.pl || p.plMatch !== M.id) {
     const sp = GH.spawnPoint(M.seed, room.nextSlot++);
     p.pl = GH.newPlayer(p.id); p.plMatch = M.id; p.x = sp.x; p.y = sp.y; p.posAt = Date.now(); p.pt = mt;
+    p.lastStealAt = -1e9; p.lastGoldAt = -1e9; // match times: each match's clock starts over
   }
   if (!(p.id in M.sc)) M.sc[p.id] = 0;
   const sp = { x: Math.round(p.x), y: Math.round(p.y) };

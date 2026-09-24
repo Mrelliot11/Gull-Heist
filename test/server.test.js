@@ -398,3 +398,36 @@ test('Golden Chip: picked up at home, snatched by a swoop, and it pays its carri
   assert.equal(drop.x, Math.round(pF.x));
   await done(L);
 });
+
+test('steals still count in the next match of the same room', async () => {
+  const { L, F, room, mL } = await newRoom();
+  // a steal from just behind the nearest calm sitter, judged where the server sees the gull
+  const stealNow = async (M, seq) => {
+    const match = rooms.get(room).match, mt = (Date.now() - match.t0) / 1000 - GH.COUNTDOWN;
+    const i = M.ents.findIndex((e, k) => e.kind === 'sit' && !e.grump && match.M.fu[k] <= mt);
+    const e = M.ents[i], f = GH.faceAt(e, mt, match.M.al[i], []);
+    const x = e.x - Math.cos(f) * 6 - Math.sin(f) * 5, y = e.y - Math.sin(f) * 6 + Math.cos(f) * 5;
+    const p = srv(room, L); p.x = x; p.y = y;
+    const at = L.mark();
+    L.send({ t: 'steal', seq, i, x, y, mt });
+    return (await L.wait(m => m.t === 'res' && m.seq === seq, at)).k;
+  };
+  // late in the first match
+  skipCountdown(room, 80);
+  assert.equal(await stealNow(GH.createMatch(mL.id, mL.seed, mL.dur), 1), 'steal');
+  // time runs out; both go back to the lobby and start again
+  let at = L.mark();
+  rooms.get(room).match.t0 -= 20000;
+  await L.wait(m => m.t === 'end', at);
+  for (const c of [L, F]) c.send({ t: 'st', st: 'lobby' });
+  await L.wait(m => m.t === 'lobby' && !m.match && m.members.every(p => p.st === 'lobby'), at);
+  at = L.mark();
+  L.send({ t: 'start' });
+  const m2 = await L.wait(m => m.t === 'match', at);
+  for (const c of [L, F]) c.send({ t: 'st', st: 'play' });
+  await L.wait(m => m.t === 's' && m.id === m2.id && m.p.length === 2, at);
+  // early in the second match, well before the first match's last steal time
+  skipCountdown(room, 2);
+  assert.equal(await stealNow(GH.createMatch(m2.id, m2.seed, m2.dur), 2), 'steal');
+  await done(L, F);
+});
