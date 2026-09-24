@@ -50,7 +50,7 @@ Pick a solo mode on the title screen. In a room, the leader picks the mode in th
 |---|---|---|
 | **Classic** | solo, rooms | 90 seconds. The original rules. |
 | **Frenzy** | solo, rooms | 60 seconds. More people, everyone starts with food, food comes back twice as fast, power-ups twice as often. |
-| **Rush** | solo | 30 seconds on the clock. Each steal adds 2 seconds (4 for a cart, +1 at a x3 combo or more). |
+| **Rush** | solo | 30 seconds on the clock. Each steal adds 3 seconds (6 for a cart, +1 at a x3 combo or more). |
 | **Golden Chip** | rooms | 2 minutes. A golden fry sits by the fountain. Carry it to score 5 points a second, but you fly a little slower. Swoop onto the carrier to snatch it. A swat, a grounding or leaving drops it. |
 
 The best haul is kept for each solo mode.

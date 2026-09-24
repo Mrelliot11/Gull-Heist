@@ -47,8 +47,8 @@ test('Rush: each steal adds time to the clock', () => {
   const p = behind(M, SITTER, t);
   const r = GH.attemptSteal(M, pl, SITTER, p.x, p.y, t, []);
   assert.equal(r.k, 'steal');
-  assert.equal(r.bonus, 2);
-  assert.equal(M.dur, 32);
+  assert.equal(r.bonus, 3);
+  assert.equal(M.dur, 33);
   // Classic's clock never moves
   const C = GH.createMatch('m', SEED);
   GH.attemptSteal(C, GH.newPlayer('a'), SITTER, p.x, p.y, t, []);
